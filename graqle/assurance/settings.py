@@ -43,6 +43,7 @@ import hashlib
 import hmac
 import logging
 import os
+import stat
 import threading
 from collections.abc import Mapping
 from pathlib import Path
@@ -350,27 +351,69 @@ def _cache_key(flag: bool) -> tuple[bool, str, str, int, int]:
     return (flag, _env_fingerprint(), str(path), mtime_ns, size)
 
 
-def _check_secrets_file_safety(path: Path) -> None:
-    """PR-339 M3: refuse non-regular files; on POSIX refuse group/world access
-    bits; on Windows warn that mode bits are not checked. The path is not a
-    secret and stays in the message; content never does."""
+def _open_secrets_file(path: Path) -> str | None:
+    """PR-339 M3 + sentinel BLK-1: open-then-check on ONE descriptor.
+
+    Missing file ⇒ ``None``. On POSIX the file is opened with ``O_NOFOLLOW``
+    (a symlink at the resolved path is refused) and every check — regular
+    file, group/world mode bits — runs on ``fstat`` of the open descriptor, so
+    nothing can be swapped between the check and the read (TOCTOU). On other
+    platforms mode bits cannot be checked and a WARNING says so. The path is
+    not a secret and stays in the message; content never does.
+    """
+    if os.name == "posix":
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        try:
+            fd = os.open(path, flags)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            if getattr(exc, "errno", None) == getattr(os, "ELOOP", -1) or isinstance(
+                exc, IsADirectoryError
+            ):
+                raise ConfigurationError(
+                    f"DAG private config {path} is a symlink or directory; "
+                    "point GRAQLE_DAG_SECRETS_PATH at a regular file"
+                ) from None
+            raise ConfigurationError(
+                f"DAG private config {path} could not be opened: {type(exc).__name__}"
+            ) from None
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode):
+                raise ConfigurationError(
+                    f"DAG private config {path} is not a regular file (directory, FIFO or device)"
+                )
+            mode = st.st_mode & 0o777
+            if mode & 0o077:
+                raise ConfigurationError(
+                    f"DAG private config {path} is readable by group or others "
+                    f"(mode {mode:04o}); run: chmod 600 {path}"
+                )
+            with os.fdopen(fd, "r", encoding="utf-8") as fh:
+                fd = -1  # ownership transferred to the file object
+                return fh.read()
+        finally:
+            if fd != -1:
+                os.close(fd)
+    # Non-POSIX (Windows): no O_NOFOLLOW / mode bits; best effort + WARNING.
+    if not path.exists():
+        return None
     if not path.is_file():
         raise ConfigurationError(
             f"DAG private config {path} is not a regular file (directory, FIFO or device)"
         )
-    if os.name == "posix":
-        mode = path.stat().st_mode & 0o777
-        if mode & 0o077:
-            raise ConfigurationError(
-                f"DAG private config {path} is readable by group or others "
-                f"(mode {mode:04o}); run: chmod 600 {path}"
-            )
-    else:
-        logger.warning(
-            "DAG private config %s: file permission bits are not checked on this "
-            "platform; restrict the file ACL to the service account",
-            path,
-        )
+    logger.warning(
+        "DAG private config %s: file permission bits are not checked on this "
+        "platform; restrict the file ACL to the service account",
+        path,
+    )
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ConfigurationError(
+            f"DAG private config {path} could not be read: {type(exc).__name__}"
+        ) from None
 
 
 def _load_secrets_file(path: Path) -> dict[str, Any]:
@@ -380,11 +423,11 @@ def _load_secrets_file(path: Path) -> dict[str, Any]:
     prefixed names (either case). Error messages name the file and the
     exception class only — never file content (parse-error oracle).
     """
-    if not path.exists():
+    text = _open_secrets_file(path)
+    if text is None:
         return {}
-    _check_secrets_file_safety(path)
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data = yaml.safe_load(text)
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
         where = f" (line {mark.line + 1})" if mark is not None else ""

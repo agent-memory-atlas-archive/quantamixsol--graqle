@@ -654,6 +654,26 @@ def test_m3_posix_group_or_world_readable_rejected(
     assert load_dag_settings().cap_value == 0.31
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX O_NOFOLLOW")
+def test_m3_symlinked_secrets_file_rejected_at_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sentinel BLK-1 (round-2 pass 1): the file is opened with O_NOFOLLOW and
+    checked via fstat on the open descriptor, so a symlink swapped in after
+    resolve() cannot redirect the read (TOCTOU)."""
+    real = tmp_path / "real.yaml"
+    real.write_text("cap_value: 0.31\n", encoding="utf-8")
+    real.chmod(0o600)
+    link = tmp_path / "link.yaml"
+    link.symlink_to(real)
+    monkeypatch.setenv("GRAQLE_DAG_SECRETS_PATH", str(link))
+    # resolve() follows the link to the real file, so a stable symlink works …
+    assert load_dag_settings().cap_value == 0.31
+    # … but the descriptor-level guard rejects a symlink at the resolved path itself.
+    with pytest.raises(ConfigurationError, match="symlink"):
+        dag._open_secrets_file(link)
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows warning path")
 def test_m3_windows_warns_that_mode_bits_are_unchecked(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
