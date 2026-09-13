@@ -50,7 +50,7 @@ from types import MappingProxyType
 from typing import Any, Literal
 
 import yaml
-from pydantic import Field, ValidationError, field_validator, model_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from graqle.config.exceptions import GraqleConfigError
@@ -85,6 +85,7 @@ _TRUTHY: frozenset[str] = frozenset({"1", "true", "yes", "on"})
 
 #: Fields that MUST be present when the flag is on (CR-012 §4.5, blueprint B2).
 REQUIRED_WHEN_ENABLED: tuple[str, ...] = (
+    "config_salt",                  # CR-012 (PR-339 B1 / ruling N2): fingerprint key
     "cap_value",                    # CR-013
     "hg05_poisoning_threshold",     # CR-013 (blueprint B4)
     "hg07_materiality_threshold",   # CR-013
@@ -108,8 +109,34 @@ SECRET_VALUED_FIELDS: frozenset[str] = frozenset({
     "circuit_breaker_window",
 })
 
-# Domain-separation label for the joint commitment over secret-valued fields.
+# Domain-separation label for the commitment over secret-valued fields.
 _SECRETS_DIGEST_LABEL = b"graqle.assurance.config_version.secrets.v1"
+
+#: Deployment-layout fields (PR-339 M3): they describe WHERE a deployment keeps
+#: things, not WHAT the configuration means, and would otherwise be anchored by
+#: CR-018. Excluded from the fingerprint payload entirely.
+PATH_FIELDS: frozenset[str] = frozenset({
+    "secrets_path",
+    "recompute_queue_path",
+    "bench_results_dir",
+    "ontology_shapes_path",
+})
+
+#: Minimum length of ``GRAQLE_DAG_CONFIG_SALT`` in bytes (PR-339 B1).
+_MIN_SALT_BYTES = 32
+
+#: ``keying`` tags recorded in :func:`config_provenance` (ruling N2).
+KEYING_DEPLOYMENT_SALT = "deployment_salt_v1"
+KEYING_JOINT_CANONICAL = "joint_canonical_v1"
+
+
+def _is_absent(value: object) -> bool:
+    """``None``, ``""`` and whitespace-only strings are ABSENT (PR-339 M1)."""
+    if value is None:
+        return True
+    if isinstance(value, SecretStr):
+        value = value.get_secret_value()
+    return isinstance(value, str) and not value.strip()
 
 # Operator-readable, NUMBER-FREE hints for pydantic error types (sentinel M-3).
 # Bounds are deliberately not spelled out: the message must never let a
@@ -176,6 +203,10 @@ class DagSettings(BaseSettings):
     # ── CR-012 ────────────────────────────────────────────────────────────
     enabled: bool = False
     secrets_path: str | None = None
+    # PR-339 B1 / ruling N2: deployment secret keying config_version. SecretStr
+    # ⇒ never in repr/model_dump; excluded from the fingerprint payload and from
+    # SECRET_VALUED_FIELDS (it is the KEY, never part of the message).
+    config_salt: SecretStr | None = Field(default=None, repr=False)
 
     # ── CR-013 hard gates + cap (values TS-3; 0 rejected; no default) ─────
     cap_value: float | None = Field(default=None, gt=0.0, lt=1.0)
@@ -228,11 +259,31 @@ class DagSettings(BaseSettings):
     @field_validator("escalation_role")
     @classmethod
     def _role_known(cls, value: str) -> str:
-        from graqle.core.rbac import ROLE_PERMISSIONS  # lazy: rbac is a stdlib leaf
-
+        try:
+            from graqle.core.rbac import ROLE_PERMISSIONS  # lazy: rbac is a stdlib leaf
+        except ImportError as exc:  # PR-339 N1: attributable, never an opaque value_error
+            raise ConfigurationError(
+                f"core.rbac unavailable ({type(exc).__name__}); cannot validate "
+                f"{ENV_PREFIX}ESCALATION_ROLE"
+            ) from None
         if value not in ROLE_PERMISSIONS:
             raise ValueError(
                 f"escalation_role {value!r} is not a key of core.rbac.ROLE_PERMISSIONS"
+            )
+        return value
+
+    @field_validator("config_salt")
+    @classmethod
+    def _salt_long_enough(cls, value: SecretStr | None) -> SecretStr | None:
+        # PR-339 B1: blank is "absent" (handled by _required_when_enabled); a
+        # present salt must carry at least _MIN_SALT_BYTES bytes. The message
+        # never includes the value.
+        if value is None or _is_absent(value):
+            return value
+        if len(value.get_secret_value().encode("utf-8")) < _MIN_SALT_BYTES:
+            raise ConfigurationError(
+                f"{ENV_PREFIX}CONFIG_SALT is too short; it must be at least "
+                f"{_MIN_SALT_BYTES} bytes of high-entropy secret"
             )
         return value
 
@@ -241,7 +292,8 @@ class DagSettings(BaseSettings):
         # Read-only: the model is frozen; this validator never assigns.
         if not self.enabled:
             return self
-        missing = [f for f in REQUIRED_WHEN_ENABLED if getattr(self, f) is None]
+        # PR-339 M1: "", whitespace and None are all ABSENT.
+        missing = [f for f in REQUIRED_WHEN_ENABLED if _is_absent(getattr(self, f))]
         if missing:
             # Non-ValueError exceptions propagate unwrapped from pydantic
             # validators, so callers see ConfigurationError directly (AC-3).
@@ -262,11 +314,63 @@ _provenance: dict[str, str] = {}
 # assignment form one critical section; concurrent first loads (threaded
 # servers, parallel fixtures) must not interleave or lose provenance.
 _cache_lock = threading.RLock()
+# PR-339 M2: the cache is keyed on everything that can change a load — the flag,
+# every GRAQLE_DAG_* value, and the resolved private file (path, mtime_ns, size)
+# — so a rotated secret or a changed variable is never served stale in a
+# long-lived MCP process. Token of the last successful load:
+_cache_token: tuple[bool, str, str, int, int] | None = None
 
 
 def _secrets_path() -> Path:
     raw = os.environ.get(ENV_PREFIX + "SECRETS_PATH", "").strip() or DEFAULT_SECRETS_PATH
-    return Path(raw).expanduser()
+    # PR-339 M3: resolve once (symlinks, relative segments) so the safety checks
+    # and the cache key see the real file.
+    return Path(raw).expanduser().resolve()
+
+
+def _env_fingerprint() -> str:
+    """sha256 over every ``GRAQLE_DAG_*`` name=value pair (sorted). Values enter
+    the hash only; the digest is never logged (it commits to the salt)."""
+    items = sorted(
+        (k.upper(), v) for k, v in os.environ.items() if k.upper().startswith(ENV_PREFIX)
+    )
+    h = hashlib.sha256()
+    for k, v in items:
+        h.update(k.encode("utf-8") + b"=" + v.encode("utf-8", "surrogateescape") + b"\0")
+    return h.hexdigest()
+
+
+def _cache_key(flag: bool) -> tuple[bool, str, str, int, int]:
+    path = _secrets_path()
+    try:
+        st = path.stat()
+        mtime_ns, size = st.st_mtime_ns, st.st_size
+    except OSError:
+        mtime_ns, size = -1, -1
+    return (flag, _env_fingerprint(), str(path), mtime_ns, size)
+
+
+def _check_secrets_file_safety(path: Path) -> None:
+    """PR-339 M3: refuse non-regular files; on POSIX refuse group/world access
+    bits; on Windows warn that mode bits are not checked. The path is not a
+    secret and stays in the message; content never does."""
+    if not path.is_file():
+        raise ConfigurationError(
+            f"DAG private config {path} is not a regular file (directory, FIFO or device)"
+        )
+    if os.name == "posix":
+        mode = path.stat().st_mode & 0o777
+        if mode & 0o077:
+            raise ConfigurationError(
+                f"DAG private config {path} is readable by group or others "
+                f"(mode {mode:04o}); run: chmod 600 {path}"
+            )
+    else:
+        logger.warning(
+            "DAG private config %s: file permission bits are not checked on this "
+            "platform; restrict the file ACL to the service account",
+            path,
+        )
 
 
 def _load_secrets_file(path: Path) -> dict[str, Any]:
@@ -276,8 +380,9 @@ def _load_secrets_file(path: Path) -> dict[str, Any]:
     prefixed names (either case). Error messages name the file and the
     exception class only — never file content (parse-error oracle).
     """
-    if not path.is_file():
+    if not path.exists():
         return {}
+    _check_secrets_file_safety(path)
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
@@ -319,8 +424,8 @@ def _unknown_prefixed_env_vars() -> list[str]:
     )
 
 
-def _cache_is_fresh() -> bool:
-    return _cache is not None and _cache.enabled == is_dag_enabled()
+def _cache_is_fresh(key: tuple[bool, str, str, int, int]) -> bool:
+    return _cache is not None and _cache_token == key
 
 
 def load_dag_settings(*, force: bool = False) -> DagSettings:
@@ -328,23 +433,27 @@ def load_dag_settings(*, force: bool = False) -> DagSettings:
 
     Precedence: environment > private file > field default. The cache is only
     assigned on success (AC-3: no partial object is ever cached) and is
-    invalidated automatically if the flag's environment value changes.
-    Thread-safe: the whole load is one critical section (double-checked lock).
+    invalidated automatically when the flag, any ``GRAQLE_DAG_*`` value, or the
+    private file (path, mtime_ns, size) changes (PR-339 M2). Thread-safe: the
+    whole load is one critical section (double-checked lock). The flag is
+    snapshotted once per call.
 
     Raises:
         ConfigurationError: on any invalid or missing-required value. The
             message carries setting names, never values.
     """
-    if not force and _cache_is_fresh():
+    flag = is_dag_enabled()
+    key = _cache_key(flag)
+    if not force and _cache_is_fresh(key):
         return _cache  # type: ignore[return-value]
     with _cache_lock:
-        if not force and _cache_is_fresh():
+        if not force and _cache_is_fresh(key):
             return _cache  # type: ignore[return-value]
-        return _load_dag_settings_unlocked()
+        return _load_dag_settings_unlocked(flag, key)
 
 
-def _load_dag_settings_unlocked() -> DagSettings:
-    global _cache, _provenance
+def _load_dag_settings_unlocked(flag: bool, key: tuple[bool, str, str, int, int]) -> DagSettings:
+    global _cache, _provenance, _cache_token
 
     unknown = _unknown_prefixed_env_vars()
     if unknown:
@@ -380,7 +489,7 @@ def _load_dag_settings_unlocked() -> DagSettings:
         )
         raise ConfigurationError(f"DAG settings invalid: {details}") from None
 
-    if settings.enabled != is_dag_enabled():  # pragma: no cover — defensive (single source)
+    if settings.enabled != flag:  # pragma: no cover — defensive (single source)
         raise ConfigurationError(
             f"DagSettings.enabled disagrees with {ENV_FLAG}; single source violated"
         )
@@ -395,22 +504,28 @@ def _load_dag_settings_unlocked() -> DagSettings:
             provenance[name] = "SAFE_DEFAULT"
         else:
             provenance[name] = "UNSET"
+    # Ruling N2: record which keying config_version used (never the key).
+    provenance["keying"] = _keying(settings)
 
     _provenance = provenance
     _cache = settings
+    _cache_token = key
     logger.info(
-        "dag.settings.loaded enabled=%s config_version=%s",
+        "dag.settings.loaded enabled=%s keying=%s config_version=%s",
         settings.enabled,
+        provenance["keying"],
         config_version(settings)[:23],
     )
     return settings
 
 
 def reset_dag_settings_cache() -> None:
-    """Drop the cached settings and provenance (tests, ``graq serve`` reload)."""
-    global _cache, _provenance
-    _cache = None
-    _provenance = {}
+    """Drop the cached settings, token and provenance (tests, ``graq serve`` reload)."""
+    global _cache, _provenance, _cache_token
+    with _cache_lock:
+        _cache = None
+        _cache_token = None
+        _provenance = {}
 
 
 def config_provenance() -> Mapping[str, str]:
@@ -441,30 +556,48 @@ def _config_version_payload(settings: DagSettings) -> dict[str, Any]:
     )
 
     dumped = settings.model_dump(mode="json")
-    public = {k: v for k, v in dumped.items() if k not in SECRET_VALUED_FIELDS}
+    # PR-339 M3: deployment-layout paths never enter the fingerprint; the salt
+    # (the KEY) never enters it either. Everything else non-secret is in clear.
+    excluded = SECRET_VALUED_FIELDS | PATH_FIELDS | {"config_salt"}
+    public = {k: v for k, v in dumped.items() if k not in excluded}
     secret_items = {
         k: dumped[k] for k in sorted(SECRET_VALUED_FIELDS) if dumped.get(k) is not None
     }
     public["_secret_fields_set"] = sorted(secret_items)
+    public["_keying"] = _keying(settings)
     digest: str | None = None
     if secret_items:
-        # key = the secret values (PRF key, never serialised); msg = the
-        # non-secret payload under a domain label, so the digest is BOUND to
-        # the configuration it fingerprints (sentinel M-1), not to a constant.
-        key = canon(secret_items)
-        msg = _SECRETS_DIGEST_LABEL + b"|" + canon(public)
+        # PR-339 B1 / ruling N2: key = deployment salt (GRAQLE_DAG_CONFIG_SALT);
+        # message = label ‖ canon(secret values) ‖ canon(non-secret payload).
+        # Without a salt (flag off, no key configured) the joint canonical form
+        # is the fallback key; the `_keying` tag says which one was used.
+        msg = _SECRETS_DIGEST_LABEL + b"|" + canon(secret_items) + b"|" + canon(public)
+        key = _salt_bytes(settings) or canon(secret_items)
         digest = hmac.new(key, msg, hashlib.sha256).hexdigest()
     public["_secrets_digest"] = digest
     return public
+
+
+def _salt_bytes(settings: DagSettings) -> bytes | None:
+    salt = settings.config_salt
+    if salt is None or _is_absent(salt):
+        return None
+    return salt.get_secret_value().encode("utf-8")
+
+
+def _keying(settings: DagSettings) -> str:
+    """Which key material :func:`config_version` uses (ruling N2 `keying` tag)."""
+    return KEYING_DEPLOYMENT_SALT if _salt_bytes(settings) else KEYING_JOINT_CANONICAL
 
 
 def config_version(settings: DagSettings) -> str:
     """``"sha256:<hex>"`` fingerprint of the settings for
     ``DeterminismRecord.config_version`` (CR-012 §4.3) and run logs.
 
-    Deterministic across processes for the same configuration; secret values
-    never appear in clear (see :func:`_config_version_payload`). Any
-    canonicalisation failure is fail-closed — never coerced.
+    Deterministic across processes for the same configuration AND the same
+    deployment salt; secret values and the salt never appear in clear (see
+    :func:`_config_version_payload`). Any canonicalisation failure is
+    fail-closed — never coerced.
     """
     try:
         from graqle.governance.tamper_evidence.canonicalize import canon  # lazy
@@ -473,6 +606,9 @@ def config_version(settings: DagSettings) -> str:
     except ConfigurationError:
         raise
     except Exception as exc:  # TamperEvidenceError, ImportError, ...
+        # PR-339 N4: keep the failure diagnosable (type only, never the message,
+        # which could carry a value) before suppressing the chain.
+        logger.debug("config_version: canonicalisation failed with %s", type(exc).__name__)
         raise ConfigurationError(
             f"config_version could not be computed: {type(exc).__name__}"
         ) from None
@@ -488,6 +624,12 @@ def validate_flag_consistency(cfg: Any) -> None:
 
     Called from ``GraqleConfig.from_yaml()`` and from MCP server boot. With the
     flag off this is a single environment read.
+
+    PR-339 N3: today ``cfg.assurance.enabled`` reads the same environment
+    variable as :func:`is_dag_enabled`, so the mismatch branch is a tautology
+    by construction. It is kept deliberately: it is the guard that fires the
+    moment anyone monkey-patches or subclasses ``AssuranceConfig`` into a second
+    flag surface (INV-FLAG-1), which is exactly the failure the design forbids.
     """
     env_on = is_dag_enabled()
     assurance = getattr(cfg, "assurance", None)

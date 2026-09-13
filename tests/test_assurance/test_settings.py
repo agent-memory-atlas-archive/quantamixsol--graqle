@@ -54,7 +54,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ENV_EXAMPLE = _REPO_ROOT / ".env.example"
 
 # Substitute values — deliberately NOT the real ones.
+# The salt is a 40-byte test substitute (PR-339 B1: >= 32 bytes required).
+_SUBSTITUTE_SALT = "test-substitute-salt-0123456789abcdef-XYZ"
 _SUBSTITUTE_REQUIRED: dict[str, str] = {
+    "GRAQLE_DAG_CONFIG_SALT": _SUBSTITUTE_SALT,
     "GRAQLE_DAG_CAP_VALUE": "0.31",
     "GRAQLE_DAG_HG05_POISONING_THRESHOLD": "0.61",
     "GRAQLE_DAG_HG07_MATERIALITY_THRESHOLD": "0.51",
@@ -326,6 +329,7 @@ def test_ac5_env_example_declares_flag_off_and_schema_pins() -> None:
 def _write_private(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> Path:
     p = tmp_path / "graqle_secrets.yaml"
     p.write_text(body, encoding="utf-8")
+    p.chmod(0o600)  # PR-339 M3: the loader refuses group/world-readable files on POSIX
     monkeypatch.setenv("GRAQLE_DAG_SECRETS_PATH", str(p))
     return p
 
@@ -507,3 +511,185 @@ def test_assurance_settings_import_does_not_load_governance() -> None:
         "assert not bad, bad"
     )
     subprocess.run([sys.executable, "-c", code], cwd=_REPO_ROOT, check=True)
+
+
+# ─────────────── PR-339 round 2 — B1 salt · M1 blank strings · M2 cache key · M3 paths ──
+
+
+def test_b1_salt_required_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GRAQLE_DAG_ENABLED", "true")
+    _set_required(monkeypatch)
+    monkeypatch.delenv("GRAQLE_DAG_CONFIG_SALT")
+    with pytest.raises(ConfigurationError, match="GRAQLE_DAG_CONFIG_SALT"):
+        load_dag_settings()
+    assert dag._cache is None
+
+
+def test_b1_short_salt_rejected_without_echo(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_required(monkeypatch, GRAQLE_DAG_CONFIG_SALT="too-short")
+    with pytest.raises(ConfigurationError) as ei:
+        load_dag_settings()
+    assert "GRAQLE_DAG_CONFIG_SALT" in str(ei.value)
+    assert "too-short" not in str(ei.value)
+
+
+def test_b1_identical_secrets_different_salts_differ(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_required(monkeypatch)
+    a = config_version(load_dag_settings())
+    assert config_provenance()["keying"] == "deployment_salt_v1"
+    monkeypatch.setenv("GRAQLE_DAG_CONFIG_SALT", _SUBSTITUTE_SALT[::-1])
+    b = config_version(load_dag_settings())
+    assert a != b
+
+
+def test_b1_salt_never_in_payload_dump_repr_logs_or_provenance(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _set_required(monkeypatch)
+    with caplog.at_level(logging.DEBUG, logger="graqle.assurance.settings"):
+        s = load_dag_settings()
+        config_version(s)
+    payload = dag._config_version_payload(s)
+    assert "config_salt" not in payload
+    flat = " ".join(
+        [
+            repr(payload),
+            repr(s),
+            str(s.model_dump(mode="json")),
+            repr(dict(config_provenance())),
+            *(r.getMessage() for r in caplog.records),
+        ]
+    )
+    assert _SUBSTITUTE_SALT not in flat
+    assert s.config_salt is not None
+    assert s.config_salt.get_secret_value() == _SUBSTITUTE_SALT
+
+
+def test_b1_flag_off_without_salt_uses_joint_keying() -> None:
+    s = load_dag_settings()
+    assert s.config_salt is None
+    assert re.fullmatch(r"sha256:[0-9a-f]{64}", config_version(s))
+    assert config_provenance()["keying"] == "joint_canonical_v1"
+
+
+@pytest.mark.parametrize(
+    "var",
+    [
+        "GRAQLE_DAG_CALIBRATOR_VERSION",
+        "GRAQLE_DAG_TRAJECTORY_ESTIMATOR",
+        "GRAQLE_DAG_SIGNING_KEY_ID",
+        "GRAQLE_DAG_SIGNING_KEY_VERSION",
+        "GRAQLE_DAG_CONFIG_SALT",
+    ],
+)
+@pytest.mark.parametrize("blank", ["", "   ", "\t\n"])
+def test_m1_blank_string_counts_as_absent(
+    monkeypatch: pytest.MonkeyPatch, var: str, blank: str
+) -> None:
+    monkeypatch.setenv("GRAQLE_DAG_ENABLED", "true")
+    _set_required(monkeypatch, **{var: blank})
+    with pytest.raises(ConfigurationError, match=var):
+        load_dag_settings()
+    assert dag._cache is None
+
+
+def test_m2_env_change_invalidates_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_required(monkeypatch)
+    first = load_dag_settings()
+    monkeypatch.setenv("GRAQLE_DAG_CAP_VALUE", "0.37")
+    second = load_dag_settings()
+    assert second is not first and second.cap_value == 0.37
+
+
+def test_m2_rotated_private_file_invalidates_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    p = _write_private(tmp_path, monkeypatch, "cap_value: 0.31\n")
+    first = load_dag_settings()
+    assert first.cap_value == 0.31
+    p.write_text("cap_value: 0.37\n", encoding="utf-8")
+    st = p.stat()
+    dag.os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000))
+    second = load_dag_settings()
+    assert second is not first and second.cap_value == 0.37
+
+
+def test_m2_unchanged_environment_serves_cache() -> None:
+    assert load_dag_settings() is load_dag_settings()
+
+
+def test_m3_path_fields_excluded_from_fingerprint(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_required(
+        monkeypatch,
+        GRAQLE_DAG_BENCH_RESULTS_DIR="bench-a",
+        GRAQLE_DAG_ONTOLOGY_SHAPES_PATH="shapes-a.ttl",
+    )
+    s = load_dag_settings()
+    payload = dag._config_version_payload(s)
+    for f in ("secrets_path", "recompute_queue_path", "bench_results_dir", "ontology_shapes_path"):
+        assert f not in payload
+    assert payload["signing_key_id"] == "kid-test-2026"  # a public kid stays in clear
+    a = config_version(s)
+    monkeypatch.setenv("GRAQLE_DAG_BENCH_RESULTS_DIR", "bench-b")
+    assert config_version(load_dag_settings()) == a  # topology change, same semantics
+
+
+def test_m3_non_regular_secrets_file_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GRAQLE_DAG_SECRETS_PATH", str(tmp_path))  # a directory, not a file
+    with pytest.raises(ConfigurationError, match="regular file"):
+        load_dag_settings()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX mode bits")
+def test_m3_posix_group_or_world_readable_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    p = _write_private(tmp_path, monkeypatch, "cap_value: 0.31\n")
+    p.chmod(0o644)
+    with pytest.raises(ConfigurationError, match="chmod 600"):
+        load_dag_settings()
+    p.chmod(0o600)
+    assert load_dag_settings().cap_value == 0.31
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows warning path")
+def test_m3_windows_warns_that_mode_bits_are_unchecked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _write_private(tmp_path, monkeypatch, "cap_value: 0.31\n")
+    with caplog.at_level(logging.WARNING, logger="graqle.assurance.settings"):
+        load_dag_settings()
+    assert any("permission" in r.getMessage().lower() for r in caplog.records)
+
+
+def test_n1_rbac_import_failure_is_attributable(monkeypatch: pytest.MonkeyPatch) -> None:
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _fake(name, *args, **kwargs):  # noqa: ANN001
+        if name == "graqle.core.rbac":
+            raise ImportError("simulated")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _fake)
+    with pytest.raises(ConfigurationError, match="core.rbac unavailable"):
+        DagSettings(escalation_role="lead")
+
+
+def test_n4_canon_failure_type_logged_at_debug(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import graqle.governance.tamper_evidence.canonicalize as canonmod
+
+    def _boom(_: object) -> bytes:
+        raise RuntimeError("canon down")
+
+    monkeypatch.setattr(canonmod, "canon", _boom)
+    with caplog.at_level(logging.DEBUG, logger="graqle.assurance.settings"):
+        with pytest.raises(ConfigurationError):
+            config_version(load_dag_settings())
+    assert any("RuntimeError" in r.getMessage() for r in caplog.records)
+    assert not any("canon down" in r.getMessage() for r in caplog.records)
