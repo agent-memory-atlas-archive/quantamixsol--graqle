@@ -237,7 +237,8 @@ def test_ac4_zero_rejected(monkeypatch: pytest.MonkeyPatch, var: str, flag: str)
     _set_required(monkeypatch, **{var: "0"})
     with pytest.raises(ConfigurationError, match="DAG settings invalid") as ei:
         load_dag_settings()
-    assert var[len("GRAQLE_DAG_"):].lower() in str(ei.value)
+    assert var in str(ei.value)  # names the env var, never the value
+    assert "zero is rejected" in str(ei.value)
     assert dag._cache is None
 
 

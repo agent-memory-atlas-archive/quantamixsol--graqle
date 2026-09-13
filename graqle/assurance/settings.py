@@ -43,6 +43,7 @@ import hashlib
 import hmac
 import logging
 import os
+import threading
 from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -109,6 +110,24 @@ SECRET_VALUED_FIELDS: frozenset[str] = frozenset({
 
 # Domain-separation label for the joint commitment over secret-valued fields.
 _SECRETS_DIGEST_LABEL = b"graqle.assurance.config_version.secrets.v1"
+
+# Operator-readable, NUMBER-FREE hints for pydantic error types (sentinel M-3).
+# Bounds are deliberately not spelled out: the message must never let a
+# rejected value or a tuning bound be inferred from a log line.
+_TYPE_HINTS: dict[str, str] = {
+    "greater_than": "must be above the lower bound (zero is rejected)",
+    "greater_than_equal": "must be at or above the lower bound",
+    "less_than": "must be below the upper bound",
+    "less_than_equal": "must be at or below the upper bound",
+    "float_parsing": "must be a number",
+    "int_parsing": "must be a whole number",
+    "int_from_float": "must be a whole number",
+    "bool_parsing": "must be a boolean",
+    "literal_error": "is not one of the allowed values",
+    "extra_forbidden": "is not a known DAG setting",
+    "value_error": "was rejected by a validator",
+    "missing": "is required",
+}
 
 _ImpactTier = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 
@@ -239,6 +258,10 @@ class DagSettings(BaseSettings):
 
 _cache: DagSettings | None = None
 _provenance: dict[str, str] = {}
+# Sentinel B-1 (2026-09-13): the drift scan, file read, construction and cache
+# assignment form one critical section; concurrent first loads (threaded
+# servers, parallel fixtures) must not interleave or lose provenance.
+_cache_lock = threading.RLock()
 
 
 def _secrets_path() -> Path:
@@ -296,21 +319,32 @@ def _unknown_prefixed_env_vars() -> list[str]:
     )
 
 
+def _cache_is_fresh() -> bool:
+    return _cache is not None and _cache.enabled == is_dag_enabled()
+
+
 def load_dag_settings(*, force: bool = False) -> DagSettings:
     """Load (and cache) :class:`DagSettings`.
 
     Precedence: environment > private file > field default. The cache is only
     assigned on success (AC-3: no partial object is ever cached) and is
     invalidated automatically if the flag's environment value changes.
+    Thread-safe: the whole load is one critical section (double-checked lock).
 
     Raises:
         ConfigurationError: on any invalid or missing-required value. The
             message carries setting names, never values.
     """
-    global _cache, _provenance
+    if not force and _cache_is_fresh():
+        return _cache  # type: ignore[return-value]
+    with _cache_lock:
+        if not force and _cache_is_fresh():
+            return _cache  # type: ignore[return-value]
+        return _load_dag_settings_unlocked()
 
-    if _cache is not None and not force and _cache.enabled == is_dag_enabled():
-        return _cache
+
+def _load_dag_settings_unlocked() -> DagSettings:
+    global _cache, _provenance
 
     unknown = _unknown_prefixed_env_vars()
     if unknown:
@@ -340,7 +374,8 @@ def load_dag_settings(*, force: bool = False) -> DagSettings:
         # Do not chain (`from exc`): the pydantic error object carries the
         # rejected input value and would leak through __context__ (chain 4).
         details = "; ".join(
-            f"{'.'.join(str(p) for p in e.get('loc', ()))}: {e.get('type')}"
+            f"{env_name('.'.join(str(p) for p in e.get('loc', ())))}: "
+            f"{_TYPE_HINTS.get(str(e.get('type')), str(e.get('type')))}"
             for e in exc.errors(include_url=False, include_input=False, include_context=False)
         )
         raise ConfigurationError(f"DAG settings invalid: {details}") from None
@@ -410,11 +445,15 @@ def _config_version_payload(settings: DagSettings) -> dict[str, Any]:
     secret_items = {
         k: dumped[k] for k in sorted(SECRET_VALUED_FIELDS) if dumped.get(k) is not None
     }
+    public["_secret_fields_set"] = sorted(secret_items)
     digest: str | None = None
     if secret_items:
+        # key = the secret values (PRF key, never serialised); msg = the
+        # non-secret payload under a domain label, so the digest is BOUND to
+        # the configuration it fingerprints (sentinel M-1), not to a constant.
         key = canon(secret_items)
-        digest = hmac.new(key, _SECRETS_DIGEST_LABEL, hashlib.sha256).hexdigest()
-    public["_secret_fields_set"] = sorted(secret_items)
+        msg = _SECRETS_DIGEST_LABEL + b"|" + canon(public)
+        digest = hmac.new(key, msg, hashlib.sha256).hexdigest()
     public["_secrets_digest"] = digest
     return public
 

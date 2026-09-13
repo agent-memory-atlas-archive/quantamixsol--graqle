@@ -941,6 +941,15 @@ class GraqleConfig(BaseModel):
         Migration: replace ``GraqleConfig.from_yaml("graqle.yaml")`` with
         ``resolve_config().yaml_source`` (then call ``from_yaml`` on the
         returned path) or use the resolver's higher-level helpers.
+
+        Raises:
+            graqle.assurance.settings.ConfigurationError: CR-012 (DAG-2026).
+                (a) ``assurance.enabled`` is present in the yaml — it is derived
+                from ``GRAQLE_DAG_ENABLED`` and has no yaml form; or (b) the
+                flag is ON and a required ``GRAQLE_DAG_*`` setting is absent
+                or invalid. This is the intended fail-closed startup boundary
+                (INV-FLAG-4): every yaml load is a startup boundary. With the
+                flag OFF (the default) neither condition can fire.
         """
         # CR-002 PR-002c: emit deprecation warning when resolver is enabled
         # but the caller still routes through direct from_yaml. Suppress for
