@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from graqle.config.attestation_config import AttestationConfig
 
@@ -176,7 +176,7 @@ class ActivationConfig(BaseModel):
     model_config = {"validate_assignment": True}
 
     @model_validator(mode="after")
-    def _promote_legacy_activation_schema(self) -> "ActivationConfig":
+    def _promote_legacy_activation_schema(self) -> ActivationConfig:
         """v0.62.3: promote legacy `strategy:` / `top_k:` into new fields.
 
         Conflict-resolution table is documented in SPEC-v0623-activation-schema.md §2.7.
@@ -414,7 +414,7 @@ class RoutingRuleConfig(BaseModel):
     profile: str | None = None
 
     @model_validator(mode="after")
-    def require_bedrock_fields(self) -> "RoutingRuleConfig":
+    def require_bedrock_fields(self) -> RoutingRuleConfig:
         """Bedrock routing rules must specify region and profile.
 
         FB-006: without these fields, Bedrock routing silently routes to the
@@ -564,7 +564,7 @@ class GovernancePolicyConfig(BaseModel):
     eu_ai_act: EuAiActConfig = Field(default_factory=EuAiActConfig)
 
     @model_validator(mode="after")
-    def _validate_edit_enforcement_requires_plan(self) -> "GovernancePolicyConfig":
+    def _validate_edit_enforcement_requires_plan(self) -> GovernancePolicyConfig:
         """edit_enforcement=True requires plan_mandatory=True.
 
         CG-03 (edit_enforcement) gates native Edit calls and redirects them
@@ -601,7 +601,7 @@ class DebateConfig(BaseModel):
     clearance_levels: dict[str, str] = Field(default_factory=dict)  # panelist -> clearance level
 
     @model_validator(mode="after")
-    def _load_private_defaults(self) -> "DebateConfig":
+    def _load_private_defaults(self) -> DebateConfig:
         """Fill None fields from private config at runtime."""
         from graqle.orchestration.debate_config import get as _cfg
         if self.convergence_threshold is None:
@@ -787,6 +787,33 @@ class ChatConfig(BaseModel):
     permission_mode: str = "ask"  # "ask", "auto_allow", "deny"
 
 
+class AssuranceConfig(BaseModel):
+    """CR-012 (DAG-2026): ``assurance:`` section of ``graqle.yaml``.
+
+    ``enabled`` is DERIVED from the single-source environment flag
+    ``GRAQLE_DAG_ENABLED`` (``graqle.assurance.settings.is_dag_enabled``) and is
+    deliberately a read-only *property*, not a field (INV-FLAG-1):
+
+    * it cannot be set from yaml — ``from_yaml`` rejects ``assurance.enabled``
+      before env interpolation (``_reject_yaml_derived``) and ``extra="forbid"``
+      rejects it at validation (INV-FLAG-2);
+    * it is never serialised by ``model_dump()``, so a dumped config can be fed
+      back through ``from_yaml`` without smuggling the flag into yaml
+      (blueprint B1, Senior chain 1).
+
+    The import of ``graqle.assurance`` is lazy so that, with the flag off, no
+    pre-existing module loads the assurance package at import time.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    @property
+    def enabled(self) -> bool:
+        from graqle.assurance.settings import is_dag_enabled
+
+        return is_dag_enabled()
+
+
 class GraqleConfig(BaseModel):
     """Root configuration for a GraQle instance."""
 
@@ -816,6 +843,9 @@ class GraqleConfig(BaseModel):
     backends: BackendsConfig = Field(default_factory=BackendsConfig)
     chat: ChatConfig = Field(default_factory=ChatConfig)
     attestation: AttestationConfig = Field(default_factory=AttestationConfig)
+    # CR-012 (DAG-2026): `assurance.enabled` is derived from GRAQLE_DAG_ENABLED and
+    # is rejected if present in graqle.yaml (see _reject_yaml_derived).
+    assurance: AssuranceConfig = Field(default_factory=AssuranceConfig)
 
     # G4 (Wave 2 Phase 4): additional protected file patterns requiring
     # reviewer approval on write. Extends CG-14 defaults (graqle.yaml,
@@ -845,7 +875,7 @@ class GraqleConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _warn_deprecated_connector(self) -> "GraqleConfig":
+    def _warn_deprecated_connector(self) -> GraqleConfig:
         """Emit deprecation warning if graph.connector is neo4j/neptune."""
         import warnings
         if self.graph.connector.lower() in ("neo4j", "neptune"):
@@ -864,7 +894,7 @@ class GraqleConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _validate_debate_panelists(self) -> "GraqleConfig":
+    def _validate_debate_panelists(self) -> GraqleConfig:
         """Ensure debate panelists reference defined model profiles."""
         if self.debate.mode == "off":
             return self
@@ -995,13 +1025,23 @@ class GraqleConfig(BaseModel):
         # from yaml — whether as a literal or an env-reference. This is
         # defense-in-depth ahead of the per-field validators in attestation_config.
         _reject_yaml_secrets(raw)
+        # CR-012 (DAG-2026, INV-FLAG-2): `assurance.enabled` is DERIVED from the
+        # GRAQLE_DAG_ENABLED environment flag. Its mere presence in yaml — even
+        # as a ${ENV_REF}, even when equal to the env value — is an error, so
+        # this also runs BEFORE env interpolation.
+        _reject_yaml_derived(raw)
 
         # Interpolate environment variables
         raw = _interpolate_env(raw)
         # Pass source="yaml" so secret-class field validators (e.g.
         # AttestationConfig.security.webhook_alert_url) can reject secrets that
         # must be supplied via environment variables, not graqle.yaml.
-        return cls.model_validate(raw, context={"source": "yaml"})
+        cfg = cls.model_validate(raw, context={"source": "yaml"})
+        # CR-012 (DAG-2026, blueprint B1 / INV-FLAG-4): startup validator. With
+        # the flag off this is a single environment read; with the flag on it
+        # fails closed (ConfigurationError) if any required DAG setting is absent.
+        _validate_dag_flag(cfg)
+        return cfg
 
     @classmethod
     def default(cls) -> GraqleConfig:
@@ -1109,6 +1149,50 @@ def _reject_yaml_secrets(raw: Any) -> None:
                 f"graqle.yaml (neither as a literal nor as a ${{ENV_REF}}). "
                 f"Provide it via the {env_var} environment variable instead."
             )
+
+
+# CR-012 (DAG-2026): config keys that are DERIVED from the environment and must
+# never appear in graqle.yaml, not even with a value equal to the environment's.
+# Dotted paths into the raw yaml dict, like _YAML_FORBIDDEN_SECRET_PATHS above.
+_YAML_FORBIDDEN_DERIVED_PATHS: tuple[tuple[str, ...], ...] = (
+    ("assurance", "enabled"),
+)
+
+
+def _reject_yaml_derived(raw: Any) -> None:
+    """Raise ``ConfigurationError`` if a derived key is present in the raw yaml.
+
+    Runs BEFORE ``_interpolate_env`` (a ``${GRAQLE_DAG_ENABLED}`` reference is
+    still a yaml-sourced flag). Unlike ``_reject_yaml_secrets``, presence with a
+    ``null`` value is also rejected: the key has no legitimate yaml form.
+    """
+    if not isinstance(raw, dict):
+        return
+    for path in _YAML_FORBIDDEN_DERIVED_PATHS:
+        node: Any = raw
+        for key in path[:-1]:
+            if not isinstance(node, dict) or key not in node:
+                node = None
+                break
+            node = node[key]
+        if isinstance(node, dict) and path[-1] in node:
+            from graqle.assurance.settings import ENV_FLAG, ConfigurationError
+
+            dotted = ".".join(path)
+            raise ConfigurationError(
+                f"{dotted} is derived from the {ENV_FLAG} environment variable and "
+                "must not be set in graqle.yaml (its presence is the violation, even "
+                "when equal to the environment value or given as a ${ENV_REF}). "
+                f"Remove the key and set {ENV_FLAG} in the environment."
+            )
+
+
+def _validate_dag_flag(cfg: GraqleConfig) -> None:
+    """CR-012 startup validator (blueprint B1). Lazy import keeps the assurance
+    package out of the flag-off import graph of every other module."""
+    from graqle.assurance.settings import validate_flag_consistency
+
+    validate_flag_consistency(cfg)
 
 
 def _interpolate_env(obj: Any) -> Any:
