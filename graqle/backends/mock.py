@@ -106,12 +106,18 @@ class MockBackend(BaseBackend):
             # Fallback response clearly marked as mock — full transparency
             conf = random.uniform(*self._confidence_range)
             if self._is_fallback:
+                # No confidence figure here, deliberately. An unconfigured
+                # install must never emit a number that reads like a real
+                # confidence signal — a placeholder carrying "Confidence: 79%"
+                # is indistinguishable from a governed answer to anyone
+                # skimming the output, and undermines every downstream
+                # decision-grade claim.
                 text = (
-                    f"[NO LLM CONFIGURED — this is a placeholder response, not real AI reasoning. "
-                    f"Run 'graq setup-guide' to choose a backend (free options available). "
-                    f"Run 'graq doctor' to check your setup.] "
-                    f"Placeholder analysis for this node. "
-                    f"Confidence: {conf:.0%}"
+                    "[NO LLM CONFIGURED — this is a placeholder response, not real AI reasoning. "
+                    "Run 'graq setup-guide' to choose a backend (free options available). "
+                    "Run 'graq doctor' to check your setup.] "
+                    "Placeholder analysis for this node. "
+                    "No confidence score is reported for placeholder output."
                 )
             else:
                 text = (

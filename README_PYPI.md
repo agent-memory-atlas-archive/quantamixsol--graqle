@@ -1,118 +1,108 @@
-# GraQle — AI writes code. GraQle makes it safe.
+# GraQle — give your AI a memory of how your system actually works
 
-**The missing layer between your AI code generators and production.**
-
-```bash
-pip install graqle && graq scan repo . && graq run "find every security bug"
-```
-
----
-
-## What just happened
-
-You pointed Graqle at a 6-file dental appointment system. 90 seconds later:
-
-- **8 bugs found** — 2 CRITICAL, 3 HIGH, 3 MEDIUM
-- **4 of them invisible** to pylint, mypy, flake8, and Copilot
-- **89–90% confidence** — with cross-file evidence chains
-- **8/8 fixed** — before/after diff for every file
-- **Cost: ~$0.001**
-
-The 4 invisible bugs weren't hard. They were in the *relationships* between files.
-
-`app.py` assumed `services.py` checked auth on the cancel endpoint.
-`services.py` assumed `app.py` already did it.
-Neither did.
-Any unauthenticated HTTP client could cancel any patient's appointment.
-
-**That's a HIPAA violation. That's what vibe coding at scale produces. That's what Graqle catches.**
-
----
-
-## Why your current tools miss this
-
-Copilot sees one file. Cursor sees one file. pylint sees one file.
-
-Graqle sees the **relationships between files** — the dependency graph, the assumption chains, the blast radius of every change. Bugs that only exist between files are invisible to single-file tools. They are exactly what production incidents are made of.
-
-```
-app.py ──calls──> services.py ──calls──> models.py
-   |                   |
-   └── assumes auth ───┘
-        checked here
-
-Neither checks. Graqle activates all three as agents.
-Surfaces the contradiction. 89% confidence. 47 seconds.
-```
-
----
-
-## Three commands. Full architectural intelligence.
+**Turn codebases, documents, policies and decisions into a persistent knowledge graph, so your AI agents reason over architecture and prior lessons instead of re-reading files every session.**
 
 ```bash
-# Scan any codebase — builds a typed knowledge graph
+pip install graqle
+```
+
+Models change. Tools change. Your architecture and institutional knowledge should not.
+
+---
+
+## 60-second proof
+
+```bash
+# 1. Scan a codebase into a typed knowledge graph
 graq scan repo .
-# → 5,579 nodes, 19,916 edges in seconds
 
-# Ask anything — graph-of-agents reasoning
-graq run "what are the riskiest files to change?"
-graq run "find every auth vulnerability"
-graq run "what breaks if I refactor the payment module?"
+# 2. Ask an architectural question, not a file question
+graq run "what breaks if I change the payment module?"
+# → answer + confidence + evidence trail + active nodes
 
-# Teach it — the graph never forgets
-graq learn "payment module must never call user service directly"
-# → Lesson persists. Every future audit activates it.
-# → Your new hire inherits your team's 2 years of hard lessons. Instantly.
+# 3. Teach it what code cannot tell it
+graq learn knowledge "payment module must never call user service directly"
+# → persists in the graph. Future reasoning activates this rule.
 ```
+
+Step 3 is the one that compounds — and the one prompt engineering cannot replace, because it needs a persistent typed graph as the substrate.
 
 ---
 
-## Model agnostic. Works with your existing setup.
+## Why this matters now
 
-```yaml
-# graqle.yaml
-model:
-  backend: bedrock        # or: anthropic, openai, ollama, groq, gemini...
-  model: claude-sonnet-4-6
-  profile: your-aws-profile   # uses your existing AWS credentials
-```
+Agents are getting far more capable, and still reconstruct your system from scratch every session. Models are becoming cheaper and interchangeable, which makes the intelligence layer above them — not the model itself — the thing worth owning.
 
-**14 backends.** One line change. Including Ollama for fully offline, air-gapped, zero-cost operation. Your code never leaves your machine.
+GraQle sits above the model:
 
-**Works with every AI IDE** — Claude Code, Cursor, VS Code + Copilot, Windsurf. Add 74 architecture-aware MCP tools your AI uses automatically.
-
-```bash
-graq init    # auto-detects your IDE, wires all 74 tools
-```
+- **Architecture, not files.** AI assistants see files. GraQle sees relationships, dependencies and blast radius.
+- **Memory that compounds.** Lessons and decisions become durable graph nodes, not chat history.
+- **Model independence.** Switch providers or IDEs without rebuilding the intelligence layer.
 
 ---
 
-## What you get — the full stack
+## What you get
 
 | Capability | Command |
-|:-----------|:--------|
-| Cross-file security audit | `graq run "find every auth vulnerability"` |
-| Blast radius before change | `graq impact auth.py` |
-| Governance gate | `graq preflight "refactor the auth layer"` |
-| Persistent lessons | `graq learn "validation must be in services layer"` |
-| Past mistakes surface automatically | `graq lessons auth` |
-| UX friction audit (12 dimensions) | `graq scorch run` |
-| Live browser automation | `graq phantom audit https://yourapp.com` |
+|:---|:---|
+| Blast radius before a change | `graq impact payments.py` |
+| Cross-file security audit | `graq run "find every auth bypass risk"` |
+| Architecture Q&A for onboarding | `graq run "how does checkout work end to end?"` |
+| Persistent lessons | `graq learn knowledge "..."` |
+| Audit what the graph has been taught | `graq learned` |
+| Documents, policies, ADRs into the graph | `graq scan docs ./docs` |
+| Pre-change safety check | `graq preflight "refactor the auth layer"` |
 | CI/CD governance gate | `graq predict "..." --fail-below-threshold` |
 
 ---
 
-## The compounding advantage
+## Beyond code
 
-Every audit teaches the graph. Every lesson persists. Every fix is remembered.
+```bash
+pip install "graqle[docs]"          # PDF / DOCX / PPTX / XLSX parsers
 
-The first time you use Graqle, it knows your codebase.
-After a month, it knows your patterns.
-After a year, it knows every mistake your team ever made — and blocks the next one before it's written.
+graq scan docs ./docs               # architecture docs, runbooks, specs
+graq learn doc ./policies/          # policies, ADRs, decision records
+```
 
-**Copilot forgot. Graqle remembered.**
+Documents become Document and Section nodes, auto-linked to the code they describe. Markdown, text, RST and AsciiDoc work with the base install; the richer formats need the `[docs]` extra and are reported — never silently skipped — when it's missing.
 
-No other tool has this. You cannot replicate it with prompt engineering. It requires a persistent typed knowledge graph as the execution substrate — and that's exactly what Graqle is.
+---
+
+## Works with your stack
+
+**13 LLM backends + any custom HTTP endpoint** — Anthropic, OpenAI, AWS Bedrock, Ollama, Gemini, Groq, DeepSeek, Together, Mistral, OpenRouter, Fireworks, Cohere, llama.cpp.
+
+```yaml
+# graqle.yaml
+model:
+  backend: ollama          # or: anthropic, openai, bedrock, gemini, groq...
+  model: llama3
+```
+
+Runs fully offline with Ollama or llama.cpp. **Local-first: no telemetry, and your source never leaves your machine.**
+
+**Works with every AI IDE** — Claude Code, Cursor, VS Code + Copilot, Windsurf, via **85 MCP tools** your agent uses automatically.
+
+```bash
+graq init    # detects your IDE and wires the tools
+```
+
+---
+
+## Trusted answers
+
+Every result carries `confidence`, `graph_health`, `active_nodes` and evidence pointers. Below the confidence floor, GraQle refuses rather than guesses. With no LLM configured it labels output as a placeholder and attaches no confidence score.
+
+---
+
+## Governed autonomy
+
+When agents move from reading to writing, `graq gate-install` routes write/edit/bash operations through governance gates: plans required for risky changes, secret scanning on commits, full audit trail. For deployed systems, `GovernedRuntime.attest()` records what your AI decided, anchored to the public Sigstore Rekor transparency log — verifiable by any third party.
+
+Optional compliance surfaces for regulated deployments cover the EU AI Act, SOX/COSO, ISO/IEC 42001 and GDPR claim limits; compliance frameworks are authorable as data.
+
+→ [Full documentation on GitHub](https://github.com/quantamixsol/graqle)
 
 ---
 
@@ -120,34 +110,14 @@ No other tool has this. You cannot replicate it with prompt engineering. It requ
 
 | | Free | Pro ($19/mo) | Team ($29/dev/mo) |
 |:--|:--:|:--:|:--:|
-| CLI + SDK + 74 MCP tools | Unlimited | Unlimited | Unlimited |
-| 14 LLM backends | ✅ | ✅ | ✅ |
-| Graph nodes | 500 | 25,000 | Unlimited |
+| CLI + SDK + 85 MCP tools | Unlimited | Unlimited | Unlimited |
+| 13 LLM backends + custom | ✅ | ✅ | ✅ |
+| Graph nodes | 1,000 | 25,000 | Unlimited |
 | Cloud sync | 1 project | 3 projects | Unlimited |
-| UX Vision audit | — | ✅ | ✅ |
-| Browser automation | — | ✅ | ✅ |
+| Shared team graphs + lessons | — | — | ✅ |
 
 [**graqle.com →**](https://graqle.com)
 
 ---
 
-## Quick start
-
-```bash
-pip install graqle
-
-# Scan your codebase
-graq scan repo .
-
-# Ask it anything
-graq run "what's the riskiest file to change?"
-
-# Wire it to your AI IDE
-graq init
-```
-
-**Full docs:** [github.com/quantamixsol/graqle](https://github.com/quantamixsol/graqle)
-
----
-
-*Built by Quantamix Solutions B.V. · Patent pending EP26162901.8 · Local by default · Your code never leaves your machine*
+*Built by Quantamix Solutions B.V. · Patent pending EP26167849.4 · Local by default · Your code never leaves your machine*
