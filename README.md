@@ -1,23 +1,26 @@
 <div align="center">
 
-<img alt="GraQle — Query your architecture. Prove your AI's decisions." src="https://raw.githubusercontent.com/quantamixsol/graqle/master/assets/hero-dark-hq.png" width="800">
+<img alt="GraQle — persistent organisational intelligence for AI agents." src="https://raw.githubusercontent.com/quantamixsol/graqle/master/assets/hero-dark-hq.png" width="800">
 
-# GraQle — query your architecture, prove your AI's decisions
+# GraQle — give your AI a memory of how your organisation actually works
 
-> Index any codebase as a knowledge graph so AI agents reason about **architecture** instead of grepping files. Every decision they make — at build-time or in production — gets a cryptographic receipt anchored to a public transparency log. One Python package, two surfaces: **dev intelligence** for engineers, **runtime governance** for regulators.
+> Turn the context your organisation already has — **codebases, documents, policies, decisions and workflows** — into a persistent typed knowledge graph, so Claude Code, Cursor, Copilot and other agents reason over architecture, dependencies, prior lessons and evidence instead of re-reading disconnected files every session.
+
+**Models change. Tools change. Your architecture and institutional knowledge should not.**
 
 [![PyPI](https://img.shields.io/pypi/v/graqle?color=%2306b6d4&label=PyPI)](https://pypi.org/project/graqle/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-06b6d4.svg)](https://python.org)
-[![LLM Backends](https://img.shields.io/badge/backends-14-06b6d4.svg)]()
+[![LLM Backends](https://img.shields.io/badge/backends-13%20%2B%20custom-06b6d4.svg)]()
 [![Model Agnostic](https://img.shields.io/badge/model-agnostic-06b6d4.svg)]()
-[![EU AI Act–aligned](https://img.shields.io/badge/EU%20AI%20Act-aligned-22c55e.svg)](./docs/compliance/eu-ai-act/)
+[![MCP Tools](https://img.shields.io/badge/MCP%20tools-85-06b6d4.svg)]()
+[![Local-first](https://img.shields.io/badge/local--first-no%20telemetry-22c55e.svg)](#enterprise-trust)
 [![Patent-pending](https://img.shields.io/badge/patent-pending%20EP26167849.4-7c3aed.svg)](#patent--license)
 
 ```bash
 pip install graqle
 ```
 
-[Website](https://graqle.com) · [Quickstart](#90-second-quickstart) · [Runtime governance](#run-time--attach-governance-to-a-deployed-ai-in-one-line) · [EU AI Act docs](./docs/compliance/eu-ai-act/) · [Changelog](./CHANGELOG.md) · [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=graqle.graqle-vscode)
+[Website](https://graqle.com) · [Quickstart](#90-second-proof) · [How it works](#how-it-works) · [Governed autonomy](#governed-autonomy) · [Regulated deployments](#regulated-deployments) · [Changelog](./CHANGELOG.md) · [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=graqle.graqle-vscode)
 
 <!-- mcp-name: io.github.quantamixsol/graqle -->
 
@@ -25,43 +28,164 @@ pip install graqle
 
 ---
 
-## Two surfaces, one substrate
+## Why GraQle exists
 
-|  | **Build-time** (dev intelligence) | **Run-time** (production governance) |
-|---|---|---|
-| Governs | how your AI **writes code** | what your deployed AI **decides** |
-| Trigger | a code change | a production decision (loan, hiring, triage, …) |
-| Emits | reviewed, impact-analysed, audit-logged changes | a tamper-evident, third-party-verifiable record per decision |
-| Built on | typed code knowledge graph + multi-agent reasoning | Layer 5 cryptographic substrate (RFC 8785 JCS → RFC 6962 Merkle → ed25519 → Sigstore Rekor) |
-| Status | **GA** | **GA** — `attest()` capture (v0.60.0) + FastAPI middleware / `@governed` (v0.61.0) + continuous anchoring worker `graqle govern serve` (**v0.62.0**) |
+Your AI coding tool is good at generating code. It is bad at remembering.
 
-> **Build-time governance proves *we hold ourselves to this standard* — GraQle is developed through its own governance. Run-time governance lets you hold *your deployed AI* to the same cryptographically-verifiable standard. Same substrate, both surfaces.**
+Every session it reconstructs your system from whatever files fit in the context window. It has never read the architecture decision you made last March, the incident that made you move validation into the service layer, or the policy that says refunds above a threshold need manager approval. That knowledge exists — in your repo, your docs, your decision records, your team's heads — but it isn't connected to anything, so it can't be reasoned over.
+
+GraQle builds that connection once and keeps it.
+
+- **Architecture, not files.** AI assistants see files. GraQle sees relationships, dependencies and blast radius.
+- **Memory that compounds.** Lessons, decisions and documents become durable graph nodes instead of disappearing with a chat session.
+- **Model independence.** Swap models, providers or IDEs without rebuilding the intelligence layer.
 
 ---
 
-## 90-second quickstart
-
-### Build-time — query your codebase as a graph
+## 90-second proof
 
 ```bash
-# 1. Scan any codebase into a knowledge graph
+pip install graqle
+
+# 1. Scan a codebase into a typed knowledge graph
 graq scan repo .
-# → typed graph: functions, classes, modules, imports, calls — full architecture mapped in seconds
+# → functions, classes, modules, imports, calls — architecture mapped in seconds
 
-# 2. Ask GraQle to audit it
-graq run "find every authentication bypass risk"
-# → Graph-of-agents activates across relevant nodes
-# → Traces cross-file attack chains the LLM alone cannot see
-# → Returns: confidence score + evidence trail + active nodes + tool hints
+# 2. Ask an architectural question, not a file question
+graq run "what breaks if I change the payment module?"
+# → activates the relevant subgraph, traces cross-file call + import chains
+# → returns: answer + confidence + evidence trail + active nodes
 
-# 3. Fix it — GraQle shows exact before/after for each file (governed)
-
-# 4. Teach it back — the graph never forgets
-graq learn "cancel endpoint must require admin auth"
-# → Lesson persists. Every future audit activates this rule.
+# 3. Teach it something it cannot read from code
+graq learn knowledge "payment module must never call user service directly"
+# → persists as a graph node. Future reasoning activates this rule.
 ```
 
-### Run-time — attach governance to a deployed AI in one line
+That third command is the one that compounds. It is also the one no amount of prompt engineering replaces — it requires a persistent typed graph as the substrate.
+
+### Bring in the knowledge that isn't code
+
+```bash
+pip install "graqle[docs]"      # PDF / DOCX / PPTX / XLSX parsers
+
+# Ingest architecture docs, policies, ADRs, runbooks, specs
+graq scan docs ./docs
+graq learn doc ./policies/ ./decisions/architecture-review.docx
+# → Document + Section nodes, auto-linked to the code they describe
+```
+
+Markdown, text, reStructuredText and AsciiDoc parse with the base install. PDF, DOCX, PPTX and XLSX need the `[docs]` extra — without it those files are skipped and reported, never silently dropped.
+
+---
+
+## The compounding advantage
+
+The first time you run GraQle, it knows your codebase. After a month, it knows your patterns. After a year, it holds the architectural lessons, decisions and document context your team accumulated — and activates them on the change that is about to repeat an old mistake.
+
+This is the part that survives model churn. When you switch from one provider to another, or from one IDE to another, the graph is unchanged. You are not re-teaching a new model what your system is; you are pointing a different model at intelligence you already own.
+
+> **Own the intelligence your models and agents create.** Enterprises can own their data and still lose the reasoning state accumulated inside external AI tools. The graph is a local file you control.
+
+---
+
+## How it works
+
+1. **Scan** → AST + dependency analysis builds a typed graph (functions, classes, modules, imports, calls). Documents and policies enter the same graph as Document and Section nodes, auto-linked to the code they describe.
+2. **Connect** → Relationships become first-class: `IMPORTS`, `CALLS`, `DEFINES`, `SECTION_OF`. This is what makes cross-file reasoning possible.
+3. **Activate** → A pre-reasoning layer scores each node for relevance, confidence and risk **before** the LLM runs, so the model receives the relevant subgraph instead of the whole repository.
+4. **Reason** → Multiple agents debate. Outputs carry `confidence`, `graph_health`, `active_nodes` and evidence pointers.
+5. **Validate** → Answers below the confidence floor are refused rather than guessed.
+6. **Learn** → Lessons, decisions and documents become durable graph knowledge that activates on future work.
+7. **Govern & commit** → When agents move from reading to writing, gates intercept write-class operations, and decisions can be cryptographically committed.
+
+The pipeline runs through five named phases — **ANCHOR → ACTIVATE → GENERATE → VALIDATE → COMMIT**. Each phase is governance-gated, evidence-attached and audit-logged.
+
+API defaults: `confidence_threshold=0.65` (refusal floor), `gate_threshold=0.60` (gate-status floor). Both configurable per call.
+
+---
+
+## Works with the AI tools you already use
+
+You don't need another UI. GraQle runs inside the tools your team already has.
+
+```jsonc
+// .mcp/config.json
+{ "graqle": { "command": "graq", "args": ["mcp", "serve"] } }
+```
+
+**85 MCP tools** — every operation Claude Code, Cursor, VS Code Copilot or Windsurf needs, exposed as a governed tool with confidence scores, evidence pointers and audit-trail entries. No prompt engineering, no glue code. (Each tool is also aliased `kogni_*` for backward compatibility.)
+
+```bash
+graq init              # detects your IDE, wires the tools, writes the project constitution
+```
+
+`graq init` renders one rulebook for every client — Claude Code → `CLAUDE.md`, OpenAI Codex → `AGENTS.md`, Cursor → `.cursorrules`, Windsurf → `.windsurfrules` — so editing it once keeps them all in sync.
+
+---
+
+## Model independence
+
+Anthropic · OpenAI · AWS Bedrock · Ollama · Gemini · Groq · DeepSeek · Together · Mistral · OpenRouter · Fireworks · Cohere · llama.cpp — plus any custom HTTP endpoint.
+
+```yaml
+# graqle.yaml — smart task routing
+backends:
+  reasoning:  anthropic/claude-sonnet-4-6   # quality work
+  embedding:  bedrock/titan-v2              # cheap + fast
+  summaries:  ollama/llama3                 # local + free
+```
+
+Runs **fully offline** with Ollama or llama.cpp. Route different task types to different providers, or race two providers and take the first useful answer. The graph is the constant; the model is a swappable input.
+
+---
+
+## What teams use it for
+
+| Use case | Command |
+|:---|:---|
+| Blast radius before a change | `graq impact payments.py` |
+| Cross-file security audit | `graq run "find every auth bypass risk"` |
+| Architecture Q&A for onboarding | `graq run "how does checkout work end to end?"` |
+| Institutional memory | `graq learn knowledge "..."` · `graq learned` |
+| Policy + document context | `graq scan docs ./docs` · `graq learn doc ./policies/` |
+| Pre-change safety check | `graq preflight "refactor the auth layer"` |
+| Combined risk read | `graq safety-check` |
+| CI/CD governance gate | `graq predict "..." --fail-below-threshold` |
+
+---
+
+## Trusted answers
+
+Every reasoning result carries the signals that make it inspectable rather than magical:
+
+- **`confidence`** — an opaque score between 0.0 and 1.0; below the floor, GraQle refuses instead of guessing.
+- **`graph_health`** — whether the graph had enough connected context to answer well.
+- **`active_nodes`** — exactly which parts of your system informed the answer.
+- **Evidence pointers** — the path back to the source the claim rests on.
+
+These are not only governance features. They are what lets a human decide whether to act on an answer.
+
+> If no LLM backend is configured, GraQle labels its output as a placeholder and does not attach a confidence score — an unconfigured install never looks like a real answer.
+
+---
+
+## Governed autonomy
+
+Reading is low-stakes. Writing and acting are not. As soon as an agent can edit files, run commands or take production actions, you need something stronger than a good prompt.
+
+```bash
+graq gate-install      # one-time, project-local
+```
+
+This routes native write/edit/bash operations through GraQle's governance gates and adds a `permissions` backstop to `.claude/settings.json`. Plans required for risky changes. Trade-secret scanning on commits. Path-traversal hardening on subprocess capture. CG-01 through CG-20 — all on, all auditable.
+
+**Governance here is what lets you give agents more autonomy, not less.** The gate is the reason a write-capable agent is a reasonable thing to run.
+
+→ [Governance Gate spec](./docs/governance-gate.md)
+
+### When your AI makes production decisions
+
+For deployed systems, the same substrate records what your AI decided:
 
 ```python
 from graqle.governance.runtime import GovernedRuntime
@@ -78,268 +202,78 @@ def score_application(app):
     return decision
 ```
 
-Each call produces a durable, PII-safe governed record. Its leaf hash is computed with the same shipped primitive the build-time batcher uses, so a runtime record is byte-compatible with the cryptographic substrate (RFC 8785 JCS → RFC 6962 Merkle → ed25519 → Sigstore Rekor). Capture is out-of-band — it adds **0 ms to your write path**.
-
-See [`examples/runtime_attest_production_decisions.py`](./examples/runtime_attest_production_decisions.py) and [`examples/runtime_govern_serve_anchoring.py`](./examples/runtime_govern_serve_anchoring.py).
-
-### Run it as a continuous service (v0.62.0)
+Capture is out-of-band — **0 ms added to your write path**. Records are canonicalised (RFC 8785), Merkle-rooted (RFC 6962), ed25519-signed and anchored to the public Sigstore Rekor transparency log, so any third party can verify a record without access to your infrastructure, or ours.
 
 ```bash
-# Long-lived anchoring worker — flushes batches + drains the replay queue every tick
-graqle govern serve --config graqle.yaml
-
-# Cron-style one-shot tick (single flush + single replay-drain)
-graqle govern serve --once
-
-# Article-72-style monitoring snapshot — JSON suitable for any external monitor
-graqle govern health
-# → { "running": true, "ticks": 47, "records_anchored": 3120, "replay_queue_depth": 0, ... }
+graqle govern serve --config graqle.yaml   # continuous anchoring worker
+graqle govern health                       # JSON snapshot for any monitor
 ```
 
-The serve loop writes `.graqle/govern.health.json` atomically after every tick — pipe it into your existing monitoring (Prometheus, Datadog, an oncall dashboard, a simple curl).
-
-> **Independently verifiable, by anyone.** Committed batches anchor to the public Sigstore Rekor transparency log. Any third party can verify a record — auditor, regulator, counter-party — **without access to your infrastructure, or ours.** Verification doesn't depend on Quantamix staying online.
+→ [`examples/runtime_attest_production_decisions.py`](./examples/runtime_attest_production_decisions.py)
 
 ---
 
-## 💰 Token economics — a worked case study
+## One substrate, two operating modes
 
-A 4-developer team on a 50,000-node enterprise codebase **burns ~$40 per developer per day** on flat-file AI-coding tokens in 2026. The same team using GraQle's substrate:
-
-| Scenario | Annual (4 devs) | Saving |
+|  | **Build-time** (dev intelligence) | **Run-time** (decision attestation) |
 |---|---|---|
-| Flat-file baseline (Cursor / Claude Code default) | **$42,240** | — |
-| GraQle + frontier API (Sonnet 4.6) | **$19,874** | **−53%** |
-| GraQle + local SLM (Year 2, 90% migrated) | **$5,174** | **−88%** |
+| Governs | how your AI **writes code** | what your deployed AI **decides** |
+| Trigger | a code change | a production decision |
+| Emits | reviewed, impact-analysed, audit-logged changes | a tamper-evident, third-party-verifiable record |
+| Status | **GA** | **GA** |
 
-Every number is auditable. Every assumption is sourced (Anthropic pricing, Cursor power-user data, Microsoft's killed Claude Code pilot, NCBI biomedical-KG research showing >50% token reduction, Qwen3-Coder SWE-Bench benchmarks). Scale linearly to a 40-developer enterprise: **~$224k/year saved in Year 1, ~$371k/year in Year 2**.
-
-Plus six things Cursor / Copilot / Codex do not offer at any subscription tier: cryptographic audit trail, EU AI Act Article 26 readiness (€15M fine exposure), patent-defensible substrate, survive-vendor-disappearance, multi-agent governance, public Sigstore Rekor anchoring.
-
-→ **[Read the full case study](./docs/case-study-token-economics.md)** — math, sources, and a `bash` snippet to re-run it on your own team's numbers.
+Same graph, same evidence model, same audit substrate. Most teams start with build-time and never need the second mode — that's fine, and it's why it lives here rather than in the hero.
 
 ---
 
-## What is GraQle
-
-A **governance-led multi-agent reasoning system for code**, with a built-in cryptographic audit substrate for the AI you ship to production. Scan any codebase into a persistent knowledge graph. Every module becomes a reasoning agent. Agents decompose, debate, and synthesize answers with clearance-level governance. Every change — and every production decision — is impact-analysed, gate-checked, and cryptographically committed.
-
-> *AI assistants see files. GraQle sees architecture. That's why it catches the cross-file bugs they can't, and why its audit trail survives every level of tampering.*
-
-**Built for engineering teams who need:**
-
-- **Cross-file reasoning** — impact analysis, lesson recall, dependency-aware refactor (the kind of thing that requires reading 5 files; we read the graph instead).
-- **Auditable AI decisions** — confidence scores, evidence trails, tamper-evident logs anchored to a public transparency log.
-- **EU AI Act–aligned behaviour out of the box** — for European customers, regulated deployments, and analyst-grade due diligence.
-- **Model-agnostic operation** — 14 LLM backends, offline-capable via Ollama, runs entirely on your machine by default. No telemetry. Code stays on your machine.
-
----
-
-## How it works
-
-1. **Scan** → AST + dependency analysis builds a typed graph (functions, classes, modules, imports, calls).
-2. **Activate** → A pre-reasoning safety layer scores each node for relevance, confidence, and risk **before** the LLM runs.
-3. **Reason** → Multiple agents debate. Outputs carry `confidence`, `graph_health`, `active_nodes`, evidence pointers.
-4. **Gate** → Governance gates (CG-01..CG-20) intercept write-class operations. Plans required. Risks surfaced. Trade-secret + path-traversal hardening enforced.
-5. **Audit** → Every tool call is logged to `.graqle/governance/audit/` with redaction + secret scanning.
-6. **Commit** → For runtime decisions, the audit record gets canonicalised (RFC 8785), Merkle-rooted (RFC 6962), ed25519-signed, and anchored to the public Sigstore Rekor log.
-7. **Learn** → Lessons become weighted edges. The graph remembers across sessions, teams, and git operations.
-
-The pipeline runs through five named phases — **ANCHOR → ACTIVATE → GENERATE → VALIDATE → COMMIT**. Each phase is governance-gated, evidence-attached, and audit-logged.
-
-API defaults: `confidence_threshold=0.65` (refusal floor), `gate_threshold=0.60` (gate-status floor). Both are configurable per-call.
-
----
-
-## Model agnostic
-
-Anthropic · OpenAI · AWS Bedrock · Ollama · Gemini · Groq · DeepSeek · Together · Mistral · OpenRouter · Fireworks · Cohere · Azure OpenAI · custom HTTP.
-
-```yaml
-# graqle.yaml — smart task routing
-backends:
-  reasoning:  anthropic/claude-sonnet-4-6   # quality work
-  embedding:  bedrock/titan-v2              # cheap + fast
-  summaries:  ollama/llama3                 # local + free
-```
-
-Runs **fully offline** with Ollama. No telemetry. Code stays on your machine. API keys stay in your local `graqle.yaml`.
-
----
-
-## Governance gate — drop-in for Claude Code, Cursor, VS Code
-
-```bash
-graq init              # sets up a governed project (writes the constitution → CLAUDE.md)
-graq gate-install      # one-time, project-local — enforce it for Claude Code
-```
-
-**`graq init` writes the GraQle constitution into your project**, so your AI tool
-behaves like a disciplined senior engineer from the very first command: governed
-tools only (every change is checked), a defined *investigate → plan → review →
-apply → learn* workflow, built-in token-cost rules, and the project's known
-pitfalls baked in. One rulebook — shipped as
-[`graqle/data/constitution/`](./graqle/data/constitution/) — renders for every
-client (Claude Code → `CLAUDE.md`, OpenAI Codex → `AGENTS.md`, Cursor →
-`.cursorrules`, Windsurf → `.windsurfrules`), so editing it once keeps them all
-in sync.
-
-`gate-install` then routes every native write/edit/bash through GraQle's governance gates and adds a `permissions` backstop to `.claude/settings.json`. Plans required for risky changes. Trade-secret scanning on git commits. Path-traversal hardening on subprocess capture. CG-01 through CG-20 — all on, all auditable.
-
-→ [Governance Gate spec](./docs/governance-gate.md)
-
----
-
-## MCP-first
-
-```jsonc
-// .mcp/config.json
-{ "graqle": { "command": "graq", "args": ["mcp", "serve"] } }
-```
-
-**76+ MCP tools** — every operation Claude Code / Cursor / VS Code Copilot needs is exposed as a governed tool with confidence scores, evidence pointers, and audit-trail entries. No prompt engineering, no glue code.
-
----
-
-## 🇪🇺 EU AI Act–aligned
-
-**Articles 6, 9, 12, 13, 14, 15, 25, 50 become applicable on 2026-08-02.** GraQle gives your high-risk AI system the signals, audit trail, and disclosure primitives it needs — so the parts of your compliance file you can quote from us, you can quote *today*.
-
-```bash
-# One switch flips every EU-AI-Act-aware subsystem at once
-graq compliance switch on        # shell snippet → eval to enable
-graq compliance switch status    # what's actually armed, in one envelope
-graq compliance switch off       # symmetric disable
-
-# Per-subsystem CLI surface
-graq compliance status                                      # legacy + new subsystems block
-graq compliance export --since 2026-08-01 --sha256-sidecar  # Article 12 evidence
-graq compliance baseline-doc generate --output baseline.jsonl  # Q16.1 baseline
-graq compliance periodic-assessment run --period-start ... --period-end ...  # Q16.3
-graq compliance feedback record --rating 5 --note "..."     # Q16.5 observation
-graq compliance eur-lex-check                               # weekly drift guard
-```
-
-| Article | What GraQle provides | Where |
-|---|---|---|
-| **Art 4** — AI literacy | Integration guidance for providers + deployers | [Art 4 doc](./docs/compliance/eu-ai-act/article-04-ai-literacy.md) |
-| **Art 9** — Risk management | Periodic-assessment artefacts with auto-remediation triggers | `graq compliance periodic-assessment run` |
-| **Art 11** — Technical documentation | Dated, content-addressed baseline document at deployment | `graq compliance baseline-doc generate` |
-| **Art 12** — Record-keeping | JSONL audit export + SHA-256 tamper-detection sidecar | `graq compliance export` |
-| **Art 13** — Deployer transparency | `graph_health` + `confidence` on every reasoning envelope | every `graq_reason` call |
-| **Art 14** — Human oversight | **Confidence-gated refusal** of auto-apply + claim-limits vocabulary | `GRAQLE_EU_AI_ACT_MODE=on` + `graq edit/apply/auto` |
-| **Art 15** — Accuracy / robustness / cybersecurity | 17 named defences + 7 measurable claims | `graq compliance status --include-robustness` |
-| **Art 25** — Value-chain responsibility | Intended-purpose declarations + PCT (Proof-Claims Token) `x-ai-eu` extension (11 fields) | [Art 25 doc](./docs/compliance/eu-ai-act/article-25-value-chain.md) + `graq pct issue/validate` |
-| **Art 43** — Conformity assessment | Substrate evidence inputs (baseline-doc + audit log + periodic assessment + robustness + Article 14 gate) for the *deployer's* Annex VI internal-control file | [Art 43 doc](./docs/compliance/eu-ai-act/article-43-conformity-assessment.md) |
-| **Art 50** — Transparency for users | Auto banner + `ai_disclosure` machine field | `GRAQLE_EU_AI_ACT_MODE=on` |
-| **Art 72** — Post-market monitoring | `graqle govern serve` continuous anchoring + `graqle govern health` snapshot | **v0.62.0** |
-
-**Three substantive non-claims kept legally clean:**
-
-- GraQle is **NOT** itself a high-risk AI system (no Annex III category applies).
-- GraQle is **NOT** a GPAI provider under Article 51 (we use third-party LLMs, we don't place one on the EU market).
-- We **provide signals, audit primitives, and conformity-assessment evidence inputs**. We never say *compliant* or *certified*. The discipline is enforced in code — `TestNonClaimsInvariants` blocks any release that introduces a `compliant`/`certified` field.
-
-→ **[Full Article-by-Article mapping in docs/compliance/eu-ai-act/](./docs/compliance/eu-ai-act/)**
-
-### Contributions welcome on the compliance docs
-
-The EU AI Act docs are deliberately open to contribution — **corrections, translations (DE/FR/ES/IT have highest demand), compliance gap reports from deployers building Annex VI internal-control files, and cross-framework mappings (NIST AI RMF, ISO 42001, ENISA, etc.) are all welcome.** See [CONTRIBUTING-COMPLIANCE.md](./CONTRIBUTING-COMPLIANCE.md) for the contribution guide, the vocabulary discipline the CI enforces, and what kinds of changes go through which review path.
-
----
-
-## Security & integrity
+## Enterprise trust
 
 | | |
 |---|---|
+| **Local-first** | The graph is a file in your project. Default operation is entirely on your machine. |
 | **No telemetry** | GraQle does not phone home, collect usage data, or send analytics. |
-| **No code upload** | Source never leaves your machine unless you opt in to cloud sync. |
-| **Secret scanning** | 200+ regex patterns + Shannon-entropy detection + AST scan on every output candidate. |
+| **No code upload** | Source never leaves your machine unless you explicitly log in and opt in to cloud sync — which syncs graph artefacts, never your source. |
+| **Secret scanning** | 200+ regex patterns + entropy detection + AST scan on every output candidate. |
 | **PyPI Trusted Publishing** | OIDC-only — no long-lived API tokens in our pipeline. |
 | **Sigstore signatures** | Every wheel signed by our GitHub Actions identity. Verify with `graq trustctl verify --version <v>`. |
 | **CycloneDX SBOM** | Attached to every GitHub Release. |
-| **`.pth`-file guard** | Publish pipeline rejects any wheel containing `.pth` files (the LiteLLM-class attack vector). |
-| **Reproducible builds** | `SOURCE_DATE_EPOCH`-pinned, rebuild from tagged source and compare checksums. |
+| **Reproducible builds** | `SOURCE_DATE_EPOCH`-pinned; rebuild from tagged source and compare checksums. |
 | **Survive-disappearance** | Production audit records anchor to public Sigstore Rekor — verifiable even if Quantamix disappears. |
 
-→ Full disclosure policy: [SECURITY.md](./SECURITY.md) · Report vulnerabilities to **security@quantamixsolutions.com**
+→ [SECURITY.md](./SECURITY.md) · Report vulnerabilities to **security@quantamixsolutions.com**
 
 ---
 
-## What's new in v0.75.0
+## Regulated deployments
 
-**The EU AI Act layer is complete.** GraQle now offers an optional, configurable
-EU AI Act (Reg. (EU) 2024/1689) compliance layer — **off by default**, enforced
-through a tamper-evident, irreversible latch.
+If you operate in a regulated environment, the same substrate produces compliance evidence. If you don't, you can skip this section entirely — nothing above depends on it.
 
-- **Configurable + irreversible latch** (`governance.eu_ai_act` in `graqle.yaml`):
-  once enabled, the layer cannot be silently disabled and `blocking` cannot be
-  downgraded to `advisory`. The latch is an **ed25519-signed, hash-chained**
-  record (`.graqle/eu_ai_act_latch.jsonl`) — not a hand-editable flag — so a
-  tamper attempt fails closed and can never turn it off.
-- **Enforced compliance phase (CG-EU-AIA)** wired into the gate: when enabled,
-  AIA-relevant **write** tools pass an Article-14 human-oversight check.
-  `blocking` + low confidence → refused with an **audited per-action override**
-  path; `advisory` → recorded + advised, never blocked. **Reads, planning, and
-  reasoning are never gated.**
-- **Light-touch + honest by design** — a record-keeping / traceability **aid**
-  (supports Art. 12 / 72), not a hard wall, and not a substitute for human
-  compliance judgement. The latch *supports* the Act's expectations; it is **not
-  "required by the Act."**
+[![EU AI Act–aligned](https://img.shields.io/badge/EU%20AI%20Act-aligned-22c55e.svg)](./docs/compliance/eu-ai-act/)
 
-This completes GraQle's universal-governance arc (constitution-as-code →
-every client → universal server gate → cost-is-observability → EU AI Act layer).
+**GraQle is EU AI Act–aligned by design.** We give your high-risk AI system the signals, audit trail, and disclosure primitives you need to satisfy your own Article 9 risk-management file — without GraQle itself being subject to the high-risk obligations. Articles 6, 9, 12, 13, 14, 15, 25, 50 became applicable on 2026-08-02.
 
-→ [Full v0.75.0 changelog](./CHANGELOG.md)
+```bash
+graq compliance switch on        # flips every EU-AI-Act-aware subsystem
+graq compliance status           # what's actually armed
+graq compliance export --since 2026-08-01 --sha256-sidecar   # Article 12 evidence
+```
 
----
+**Three non-claims, kept legally clean:**
 
-## What's new in v0.73.0
+- GraQle is **NOT** itself a high-risk AI system (no Annex III category applies).
+- GraQle is **NOT** a GPAI provider under Article 51 (we use third-party LLMs; we don't place one on the EU market).
+- We provide signals, audit primitives and conformity-assessment evidence inputs. We never say *compliant* or *certified* — a CI invariant blocks any release that introduces such a field.
 
-**Cost is observability, never a quality gate.** GraQle never cuts reasoning or
-debate quality to save money. Every cost path is now **advisory**: it measures
-and surfaces spend (the cost-savings story) but never halts still-valuable work.
+**Beyond the EU.** The evidence substrate is framework-neutral, and compliance packs are **data, not code** — a framework is two files (`pack.yaml` + `schema.json`), no Python and no engine change:
 
-- **Reasoning** continues past budget to natural convergence / `max_rounds`; the
-  cost of continuing is measured (`continuation_cost_usd` in result metadata).
-- **Multi-backend debate** no longer stops on budget — it runs to `max_rounds`
-  and reports over-budget rounds instead.
-- **Advisory per-session cost meter** in the MCP server surfaces `session_cost_usd`
-  and a one-time over-budget note — purely observational, never blocks a tool,
-  and hardened against malformed cost values.
-- Runaway protection stays value-based (`max_rounds` + the absolute LLM-call
-  ceiling), never price-based.
+- **SOX / COSO** — ships today as the `x-sox` pack: internal control IDs, financial-statement assertions, reporting periods, management review.
+- **ISO/IEC 42001** — Cl. 6.2 and Cl. 9.1 mapped through the baseline-document and periodic-assessment artefacts.
+- **GDPR** — `gdpr_processor_only` is a canonical claim limit on every record.
+- **NIST AI RMF, SOC 2, HIPAA and sector frameworks** — authorable as packs today; first-party packs and cross-framework mappings are open for contribution.
 
-→ [Full v0.73.0 changelog](./CHANGELOG.md)
+The claim-limits taxonomy makes the *scope* of every decision explicit, so a downstream auditor can answer "what does this record **not** claim?" without guesswork.
 
----
-
-## What's new in v0.72.0
-
-**One constitution, every AI client.** The governance rulebook now renders into
-every supported client from a single source — including **OpenAI Codex** via
-`AGENTS.md`, which previously had no instruction file. Run `graq init` and your
-AI tool pair-programs with a disciplined senior engineer from the first command,
-whichever tool you use.
-
-- **The constitution** ([`graqle/data/constitution/`](./graqle/data/constitution/)) — governed-tools-only rules, the 9-phase workflow, the full MCP tool inventory, token-cost rules, learned-behaviour workarounds, and a configurable (off-by-default) EU AI Act section. Modular Markdown; edit once, every client stays in sync.
-- **Per-client rendering:** Claude Code → `CLAUDE.md`, **OpenAI Codex → `AGENTS.md`** (new), Cursor → `.cursorrules`, Windsurf → `.windsurfrules`. Append-under-marker and idempotent — an existing file is never clobbered.
-- **`graq gate-install`** adds a non-destructive `permissions` backstop to `.claude/settings.json` (deny native write/exec, allow the governed `graq_*` tools) behind the existing PreToolUse hook.
-
-→ [Full v0.72.0 changelog](./CHANGELOG.md)
-
----
-
-## Recent releases
-
-- **v0.62.0** — Runtime R2: `graqle govern serve` continuous anchoring worker + `govern health` Article-72 monitoring snapshot.
-- **v0.61.0** — Runtime R1: FastAPI middleware + `@governed` decorator. Drop-in governance for any FastAPI app.
-- **v0.60.0** — Runtime R0 Mode A: `GovernedRuntime.attest()` and PII-safe `pseudonymize_ref()`.
-- **v0.59.0** — Layer 5 cryptographic substrate GA: RFC 8785 canonicalisation + RFC 6962 Merkle commitments + ed25519 signatures + Sigstore Rekor anchoring + local replay queue.
-- **v0.58.0** — EU AI Act Wave 3 substrate (Article 43 conformity-assessment evidence) + OPSF PCT alignment + `GRAQLE_WORKTREE_ROOT` for parallel-worktree dev.
-- **v0.57.0** — EU AI Act Wave 2: `graq compliance switch` single entry-point, Article 14 confidence-gated refusal, claim-limits vocabulary, EUR-Lex drift guard.
-
-→ [Full changelog](./CHANGELOG.md)
+→ [Full Article-by-Article mapping](./docs/compliance/eu-ai-act/) · [How to contribute a mapping](./CONTRIBUTING-COMPLIANCE.md)
 
 ---
 
@@ -347,12 +281,34 @@ whichever tool you use.
 
 | Tier | What you get |
 |---|---|
-| **Free** | Local-only graphs · core SDK · governance gates · EU AI Act surfaces · `attest()` runtime · `govern serve` anchoring (self-hosted, anchored to public Rekor) |
+| **Free** | Local graphs · core SDK · 85 MCP tools · governance gates · `attest()` runtime · self-hosted anchoring to public Rekor |
 | **Pro — $19/mo** | Cloud sync · priority models · hosted Rekor relay |
-| **Team — $29/dev/mo** | Shared KGs · team-wide lessons · audit log retention · SOC 2 evidence pack |
+| **Team — $29/dev/mo** | Shared graphs · team-wide lessons · audit-log retention · SOC 2 evidence pack |
 | **Enterprise** | On-prem · custom backends · dedicated support · regulated-deployment SLAs · [contact us](mailto:sales@quantamixsolutions.com) |
 
-The free tier is real: the verifier, the runtime attestation path, and the continuous anchoring worker are all in the open-source SDK. Paid tiers add operational scale, team features, and a managed Rekor relay.
+The free tier is real: the verifier, the runtime attestation path and the continuous anchoring worker are all in the open-source SDK.
+
+---
+
+## Token economics
+
+Activating a relevant subgraph costs fewer tokens than repeatedly feeding a model whole files. On a 50,000-node enterprise codebase, a sourced case study puts a 4-developer team at **−53%** against a flat-file baseline in year one, and **−88%** once local models carry the routine work.
+
+Treat this as supporting evidence rather than the reason to adopt: inference prices keep falling, while context fragmentation and lost institutional knowledge do not.
+
+→ [Read the full case study](./docs/case-study-token-economics.md) — math, sources, and a snippet to re-run it on your own numbers.
+
+---
+
+## Recent releases
+
+- **v0.83.0** — Scheduler contract for `graq rebuild` (`--headless` / `--json`, exit codes) + reasoning-quota metering.
+- **v0.75.0** — Optional EU AI Act layer, off by default, behind a tamper-evident irreversible latch.
+- **v0.73.0** — Cost is observability, never a quality gate: reasoning never truncates to save money.
+- **v0.72.0** — One constitution, every AI client (Claude Code, Codex, Cursor, Windsurf).
+- **v0.62.0** — `graqle govern serve` continuous anchoring worker + health snapshot.
+
+→ [Full changelog](./CHANGELOG.md)
 
 ---
 
@@ -360,13 +316,13 @@ The free tier is real: the verifier, the runtime attestation path, and the conti
 
 Core methods are patent-pending: **EP26167849.4** (filed 2026-03-25), **EP26162901.8** (CIP), and **EP26166054.2** (CogniGraph divisional). The SDK source is fully auditable under the GraQle License — see [LICENSE](./LICENSE). Reimplementation of the patented methods outside this SDK requires a separate patent license.
 
-→ [github.com/quantamixsol/graqle](https://github.com/quantamixsol/graqle) — issues, discussions, contributions welcome.
+→ [github.com/quantamixsol/graqle](https://github.com/quantamixsol/graqle) — issues, discussions and contributions welcome.
 
 ---
 
 <div align="center">
 
 **GraQle is built by [Quantamix Solutions](https://quantamixsolutions.com).**
-*Query your architecture. Prove your AI's decisions.*
+*The intelligence that survives when the model, the agent and the interface change.*
 
 </div>

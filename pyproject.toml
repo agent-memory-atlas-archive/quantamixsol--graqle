@@ -15,8 +15,8 @@ name = "graqle"
 # dual-provider autonomy. 0.77.0 = ADR-239 Stage 2
 # (CheckpointProtocol + run_tests). 0.76.0 = ADR-225 G1 multi-tenant memory.
 version = "0.83.0"
-description = "Give your AI tools architecture-aware reasoning. Build a knowledge graph from any codebase — dependency analysis, impact analysis, governed AI answers with confidence scores. Works with Claude Code, Cursor, VS Code Copilot. 14 LLM backends, fully offline capable."
-readme = "README.md"
+description = "Persistent organisational intelligence for AI agents. Turn codebases, documents, policies and decisions into a knowledge graph so Claude Code, Cursor and Copilot reason over architecture, dependencies and prior lessons — with confidence scores and evidence. 13 LLM backends + custom, fully offline capable."
+readme = "README_PYPI.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
 authors = [
@@ -31,6 +31,13 @@ keywords = [
     "static-analysis", "code-quality", "cli", "refactoring",
     "multi-agent", "reasoning", "governance", "ai-assistant",
     "code-understanding", "institutional-memory",
+    # Category keywords — ADR-README-001 repositioning toward persistent
+    # organisational intelligence. The code keywords above stay: code
+    # architecture remains the developer wedge and the discovery path.
+    "organizational-intelligence", "organisational-intelligence",
+    "persistent-memory", "agent-memory", "context-engineering",
+    "document-intelligence", "ai-governance", "governed-autonomy",
+    "model-agnostic", "rag-alternative",
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
