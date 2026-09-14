@@ -26,6 +26,8 @@ from __future__ import annotations
 # dependencies: pytest, graqle.assurance.settings, graqle.config.settings
 # constraints: substitute values only (TS-2/TS-3)
 # -- /graqle:intelligence --
+import hashlib
+import hmac
 import logging
 import re
 import subprocess
@@ -565,11 +567,61 @@ def test_b1_salt_never_in_payload_dump_repr_logs_or_provenance(
     assert s.config_salt.get_secret_value() == _SUBSTITUTE_SALT
 
 
-def test_b1_flag_off_without_salt_uses_joint_keying() -> None:
+def test_c1_flag_off_without_salt_is_an_unkeyed_checksum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PR-339 C1: with no salt the digest is a plain sha256 over the message —
+    never an HMAC keyed by the values it authenticates."""
+    monkeypatch.setenv("GRAQLE_DAG_CAP_VALUE", "0.31")  # a secret value is present
     s = load_dag_settings()
     assert s.config_salt is None
     assert re.fullmatch(r"sha256:[0-9a-f]{64}", config_version(s))
-    assert config_provenance()["keying"] == "joint_canonical_v1"
+    assert config_provenance()["keying"] == "unkeyed_checksum_v1"
+
+    payload = dag._config_version_payload(s)
+    assert payload["_keying"] == "unkeyed_checksum_v1"
+    from graqle.governance.tamper_evidence.canonicalize import canon
+
+    public = {k: v for k, v in payload.items() if k != "_secrets_digest"}
+    secret_items = {"cap_value": 0.31}
+    msg = dag._SECRETS_DIGEST_LABEL + b"|" + canon(secret_items) + b"|" + canon(public)
+    assert payload["_secrets_digest"] == hashlib.sha256(msg).hexdigest()
+    # and NOT the old value-keyed MAC
+    assert payload["_secrets_digest"] != hmac.new(
+        canon(secret_items), msg, hashlib.sha256
+    ).hexdigest()
+
+
+def test_c1_no_value_keyed_mac_remains_in_the_source() -> None:
+    """The fallback must not exist as a precedent, even unreachable."""
+    src = (_REPO_ROOT / "graqle" / "assurance" / "settings.py").read_text(encoding="utf-8")
+    assert "or canon(secret_items)" not in src
+    assert "joint_canonical" not in src
+
+
+def test_c2_inode_change_invalidates_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR-339 C2: an atomic rename-replacement can preserve mtime_ns and size,
+    so the token carries st_ino too."""
+    p = _write_private(tmp_path, monkeypatch, "cap_value: 0.31\n")
+    first = load_dag_settings()
+    assert first.cap_value == 0.31
+    st = p.stat()
+
+    replacement = tmp_path / "replacement.yaml"
+    replacement.write_text("cap_value: 0.37\n", encoding="utf-8")
+    replacement.chmod(0o600)
+    dag.os.utime(replacement, ns=(st.st_atime_ns, st.st_mtime_ns))
+    dag.os.replace(replacement, p)  # same path, same mtime_ns, same size
+    after = p.stat()
+    assert (after.st_mtime_ns, after.st_size) == (st.st_mtime_ns, st.st_size)
+
+    second = load_dag_settings()
+    if after.st_ino and after.st_ino != st.st_ino:
+        assert second is not first and second.cap_value == 0.37
+    else:  # filesystems that report st_ino == 0 (some Windows volumes)
+        pytest.skip("filesystem does not expose a distinguishing inode")
 
 
 @pytest.mark.parametrize(

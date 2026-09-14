@@ -127,8 +127,15 @@ PATH_FIELDS: frozenset[str] = frozenset({
 _MIN_SALT_BYTES = 32
 
 #: ``keying`` tags recorded in :func:`config_provenance` (ruling N2).
+#:
+#: ``deployment_salt_v1`` is the only keyed form: HMAC-SHA256 under
+#: ``GRAQLE_DAG_CONFIG_SALT``. Without a salt — reachable only with the flag off,
+#: where no required value is loaded — the fingerprint is an explicitly UNKEYED
+#: checksum. A MAC keyed by the data it authenticates must not exist in this
+#: codebase, even unreachable (PR-339 C1). CR-018: the anchoring path must refuse
+#: any fingerprint whose ``keying != "deployment_salt_v1"``.
 KEYING_DEPLOYMENT_SALT = "deployment_salt_v1"
-KEYING_JOINT_CANONICAL = "joint_canonical_v1"
+KEYING_UNKEYED_CHECKSUM = "unkeyed_checksum_v1"
 
 
 def _is_absent(value: object) -> bool:
@@ -315,11 +322,13 @@ _provenance: dict[str, str] = {}
 # assignment form one critical section; concurrent first loads (threaded
 # servers, parallel fixtures) must not interleave or lose provenance.
 _cache_lock = threading.RLock()
-# PR-339 M2: the cache is keyed on everything that can change a load — the flag,
-# every GRAQLE_DAG_* value, and the resolved private file (path, mtime_ns, size)
-# — so a rotated secret or a changed variable is never served stale in a
-# long-lived MCP process. Token of the last successful load:
-_cache_token: tuple[bool, str, str, int, int] | None = None
+# PR-339 M2 + C2: the cache is keyed on everything that can change a load — the
+# flag, every GRAQLE_DAG_* value, and the resolved private file (path, inode,
+# mtime_ns, size) — so a rotated secret or a changed variable is never served
+# stale in a long-lived MCP process. The inode is in the token because an atomic
+# rename-replacement can preserve both mtime_ns and size (C2). Token of the last
+# successful load:
+_cache_token: tuple[bool, str, str, int, int, int] | None = None
 
 
 def _secrets_path() -> Path:
@@ -341,14 +350,17 @@ def _env_fingerprint() -> str:
     return h.hexdigest()
 
 
-def _cache_key(flag: bool) -> tuple[bool, str, str, int, int]:
+def _cache_key(flag: bool) -> tuple[bool, str, str, int, int, int]:
     path = _secrets_path()
     try:
         st = path.stat()
-        mtime_ns, size = st.st_mtime_ns, st.st_size
+        # PR-339 C2: st_ino as well — an atomic rename-replacement can preserve
+        # mtime_ns and size. (st_ino is 0 on some Windows filesystems; the env
+        # fingerprint and the other components still change there.)
+        ino, mtime_ns, size = st.st_ino, st.st_mtime_ns, st.st_size
     except OSError:
-        mtime_ns, size = -1, -1
-    return (flag, _env_fingerprint(), str(path), mtime_ns, size)
+        ino, mtime_ns, size = -1, -1, -1
+    return (flag, _env_fingerprint(), str(path), ino, mtime_ns, size)
 
 
 def _open_secrets_file(path: Path) -> str | None:
@@ -467,7 +479,7 @@ def _unknown_prefixed_env_vars() -> list[str]:
     )
 
 
-def _cache_is_fresh(key: tuple[bool, str, str, int, int]) -> bool:
+def _cache_is_fresh(key: tuple[bool, str, str, int, int, int]) -> bool:
     return _cache is not None and _cache_token == key
 
 
@@ -495,7 +507,9 @@ def load_dag_settings(*, force: bool = False) -> DagSettings:
         return _load_dag_settings_unlocked(flag, key)
 
 
-def _load_dag_settings_unlocked(flag: bool, key: tuple[bool, str, str, int, int]) -> DagSettings:
+def _load_dag_settings_unlocked(
+    flag: bool, key: tuple[bool, str, str, int, int, int]
+) -> DagSettings:
     global _cache, _provenance, _cache_token
 
     unknown = _unknown_prefixed_env_vars()
@@ -610,13 +624,19 @@ def _config_version_payload(settings: DagSettings) -> dict[str, Any]:
     public["_keying"] = _keying(settings)
     digest: str | None = None
     if secret_items:
-        # PR-339 B1 / ruling N2: key = deployment salt (GRAQLE_DAG_CONFIG_SALT);
-        # message = label ‖ canon(secret values) ‖ canon(non-secret payload).
-        # Without a salt (flag off, no key configured) the joint canonical form
-        # is the fallback key; the `_keying` tag says which one was used.
+        # PR-339 B1 / ruling N2: message = label ‖ canon(secret values) ‖
+        # canon(non-secret payload), so the commitment is bound to the whole
+        # configuration. With a deployment salt it is an HMAC under that salt;
+        # without one (flag off ⇒ no required value is loaded) it is an
+        # explicitly UNKEYED checksum — never a MAC keyed by its own message
+        # (PR-339 C1). `_keying` records which form was used.
         msg = _SECRETS_DIGEST_LABEL + b"|" + canon(secret_items) + b"|" + canon(public)
-        key = _salt_bytes(settings) or canon(secret_items)
-        digest = hmac.new(key, msg, hashlib.sha256).hexdigest()
+        salt = _salt_bytes(settings)
+        digest = (
+            hmac.new(salt, msg, hashlib.sha256).hexdigest()
+            if salt is not None
+            else hashlib.sha256(msg).hexdigest()
+        )
     public["_secrets_digest"] = digest
     return public
 
@@ -629,8 +649,8 @@ def _salt_bytes(settings: DagSettings) -> bytes | None:
 
 
 def _keying(settings: DagSettings) -> str:
-    """Which key material :func:`config_version` uses (ruling N2 `keying` tag)."""
-    return KEYING_DEPLOYMENT_SALT if _salt_bytes(settings) else KEYING_JOINT_CANONICAL
+    """Which form :func:`config_version` uses (ruling N2 `keying` tag)."""
+    return KEYING_DEPLOYMENT_SALT if _salt_bytes(settings) else KEYING_UNKEYED_CHECKSUM
 
 
 def config_version(settings: DagSettings) -> str:

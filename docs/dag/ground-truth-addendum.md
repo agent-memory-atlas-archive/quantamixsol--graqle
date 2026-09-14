@@ -27,6 +27,14 @@ Every citation above was checked against the private master tree. Anchors that m
 - `plugins/mcp_dev_server.py`: `_handle_ingest` :13108 and the raw-path block :13120-13135 unchanged; helper `_project_root_from_graph_file` :5216 unchanged. Two additional raw `Path(str(_raw)).resolve().parent` sites exist at :12487 and :12711 that the CR's 10-site list omits; PR-012c sweeps 12 sites.
 - `pyproject.toml:60` already declares `pydantic-settings>=2.0` — CR-012 OQ-2 resolved: no new dependency.
 
+## Operating the DAG flag (CR-012 / PR-012a, condition C3)
+
+These notes apply only when `GRAQLE_DAG_ENABLED` is on. With the flag off (the default) none of them is reachable.
+
+- **`GRAQLE_DAG_CONFIG_SALT` must come from a CSPRNG.** It keys the HMAC that commits to every private tuning value in `config_version`, so a guessable salt makes that commitment guessable. Generate it with `openssl rand -base64 48` (or `python -c "import secrets; print(secrets.token_urlsafe(48))"`), store it with the other deployment secrets, and never use a passphrase or any human-chosen string. The loader enforces a 32-byte floor and nothing else — length alone is not entropy. Rotating the salt changes every `config_version` computed afterwards; earlier fingerprints in run logs stay valid for the configuration they recorded but will not reproduce under the new salt, so rotate deliberately and record when. When no salt is configured the fingerprint is an explicitly unkeyed checksum tagged `keying="unkeyed_checksum_v1"`; CR-018's anchoring path refuses anything other than `deployment_salt_v1`.
+- **Kubernetes secret mounts default to `0644` and will be refused.** The private-values file is opened with `O_NOFOLLOW` and rejected when its mode carries any group or world bit, so a `secret` volume mounted with the default permissions fails closed at startup with a `chmod 600` message naming the path. Set `defaultMode: 0400` on the volume (or project the file into a directory the service account alone can read). This is deliberate: the file holds TS-2/TS-3 values.
+- **Windows residual.** `O_NOFOLLOW` and POSIX mode bits do not exist there, so symlink refusal is best effort and permissions are not checked — the loader logs a WARNING saying so. Restrict the file's ACL to the service account. A `realpath` comparison after open is a candidate for PR-012c, not a guarantee today.
+
 ## What this addendum does not change
 
 `GovernanceMiddleware.check()` is untouched by CR-012. With `GRAQLE_DAG_ENABLED` unset, every `GateResult.to_dict()` is byte-identical to 0.83.0 (CR-012 AC-9 golden fixture, PR-012c).
