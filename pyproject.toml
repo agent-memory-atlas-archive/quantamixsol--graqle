@@ -5,7 +5,11 @@ build-backend = "hatchling.build"
 [project]
 name = "graqle"
 # V-ADR240-DELTA: native version bump (G4 config, CG-14 native-edit precedent).
-# 0.83.0 = CR-010 R6 scheduler contract (--headless/--json/--report-json,
+# 0.84.0 = CR-README-01 public repositioning (README + PyPI long-description now
+# lead with persistent organisational intelligence; readme pointer moved to
+# README_PYPI.md so PyPI finally renders the conversion page) + CR-010.R3
+# compliance packs as data (x-sox SOX/COSO first) + CR-DIST-06 distribution
+# manifest autosync. 0.83.0 = CR-010 R6 scheduler contract (--headless/--json/--report-json,
 # exit codes 0/1/2/3) + ADR-245 W3 reasoning-quota wall (free monthly cap on
 # graph reasoning). 0.79.0 = ADR-242-A1 CR-SEED-02: graqle.workflow.seed — seed a project graph
 # from goal + build profile + source chunks before any code exists, and the
@@ -14,7 +18,7 @@ name = "graqle"
 # (first-to-finish/best-of-N) + CostAwareRouter (auto cost/latency selection) —
 # dual-provider autonomy. 0.77.0 = ADR-239 Stage 2
 # (CheckpointProtocol + run_tests). 0.76.0 = ADR-225 G1 multi-tenant memory.
-version = "0.83.0"
+version = "0.84.0"
 description = "Persistent organisational intelligence for AI agents. Turn codebases, documents, policies and decisions into a knowledge graph so Claude Code, Cursor and Copilot reason over architecture, dependencies and prior lessons — with confidence scores and evidence. 13 LLM backends + custom, fully offline capable."
 readme = "README_PYPI.md"
 license = {text = "Apache-2.0"}
