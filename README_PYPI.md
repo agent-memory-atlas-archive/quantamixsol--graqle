@@ -1,42 +1,58 @@
-# GraQle — give your AI a memory of how your system actually works
+# GraQle — give your AI a memory of how your organisation actually works
 
-**Turn codebases, documents, policies and decisions into a persistent knowledge graph, so your AI agents reason over architecture and prior lessons instead of re-reading files every session.**
+**Turn policies, decisions, documents and codebases into a persistent knowledge graph, so your AI agents reason over what your organisation already knows instead of rebuilding a partial picture every session.**
 
 ```bash
 pip install graqle
 ```
 
-Models change. Tools change. Your architecture and institutional knowledge should not.
+Models change. Tools change. Your institutional knowledge should not.
 
 ---
 
-## 60-second proof
+## 60-second proof — no code required
+
+Works on a folder with no code in it at all.
 
 ```bash
-# 1. Scan a codebase into a typed knowledge graph
-graq scan repo .
+# 1. Turn organisational documents into a typed graph
+graq scan docs ./policies
+# → 3 files → 12 nodes: 3 Document + 9 Section, linked by SECTION_OF
 
-# 2. Ask an architectural question, not a file question
-graq run "what breaks if I change the payment module?"
-# → answer + confidence + evidence trail + active nodes
+# 2. Teach it a rule that lives in nobody's file
+graq learn knowledge "vendor DPA must be signed before any data access" --domain policy
+# → auto-links the rule to the vendor-onboarding doc AND its "Due diligence" section
 
-# 3. Teach it what code cannot tell it
-graq learn knowledge "payment module must never call user service directly"
-# → persists in the graph. Future reasoning activates this rule.
+# 3. Ask across the whole body of knowledge
+graq run "what approval is needed for a large refund?"
+# → answer + confidence + evidence trail + the sections consulted
+
+# 4. Audit what the organisation has taught it
+graq learned
 ```
 
-Step 3 is the one that compounds — and the one prompt engineering cannot replace, because it needs a persistent typed graph as the substrate.
+Step 2 is the one that compounds — and the one prompt engineering cannot replace, because it needs a persistent typed graph as the substrate. GraQle worked out where that rule belonged on its own.
+
+### The same graph, for code
+
+```bash
+graq scan repo .                                    # functions, classes, imports, calls
+graq run "what breaks if I change the payment module?"
+graq impact payments.py                             # blast radius
+```
+
+Software architecture is the deepest-mapped domain today — a wedge, not the boundary.
 
 ---
 
 ## Why this matters now
 
-Agents are getting far more capable, and still reconstruct your system from scratch every session. Models are becoming cheaper and interchangeable, which makes the intelligence layer above them — not the model itself — the thing worth owning.
+Agents are getting far more capable and still start from zero every session. Models are becoming cheaper and interchangeable, which makes the intelligence layer above them — not the model itself — the thing worth owning.
 
 GraQle sits above the model:
 
-- **Architecture, not files.** AI assistants see files. GraQle sees relationships, dependencies and blast radius.
-- **Memory that compounds.** Lessons and decisions become durable graph nodes, not chat history.
+- **Relationships, not files.** Assistants see documents and files. GraQle sees how a policy, a decision and the code implementing it relate.
+- **Memory that compounds.** Policies, decisions and lessons become durable graph nodes, not chat history.
 - **Model independence.** Switch providers or IDEs without rebuilding the intelligence layer.
 
 ---
@@ -65,7 +81,7 @@ graq scan docs ./docs               # architecture docs, runbooks, specs
 graq learn doc ./policies/          # policies, ADRs, decision records
 ```
 
-Documents become Document and Section nodes, auto-linked to the code they describe. Markdown, text, RST and AsciiDoc work with the base install; the richer formats need the `[docs]` extra and are reported — never silently skipped — when it's missing.
+Documents become Document and Section nodes, linked by `SECTION_OF` — and to any code that implements them. Markdown, text, RST and AsciiDoc work with the base install; the richer formats need the `[docs]` extra and are reported — never silently skipped — when it's missing.
 
 ---
 
