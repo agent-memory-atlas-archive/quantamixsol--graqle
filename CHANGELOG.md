@@ -4,6 +4,101 @@ All notable changes to GraQle are documented in this file.
 
 ---
 
+## Unreleased — 0.84.0 (DAG-2026 CR-012 foundation)
+
+> Feature-flagged foundation for the Decision Assurance Gate programme (ADR-RT-004).
+> `GRAQLE_DAG_ENABLED` is **off by default** and, while off, changes no SDK behaviour:
+> `GovernanceMiddleware.check()` is untouched and byte-identical to 0.83.0.
+
+### Added (CR-012 / PR-012a)
+
+- **`graqle.assurance` package** — `is_dag_enabled()` (single-source flag reader, positive
+  allowlist `1|true|yes|on`, anything else is OFF), `DagSettings` (typed home for every DAG
+  configuration symbol, `GRAQLE_DAG_*` env prefix, frozen, unknown names rejected), `ConfigurationError`,
+  `load_dag_settings()` (environment > private file at `GRAQLE_DAG_SECRETS_PATH` > safe default;
+  cached only on success), `config_version()` (deterministic fingerprint; private values never in
+  clear), `config_provenance()`, `validate_flag_consistency()` (startup validator, fatal on mismatch).
+- **`GraqleConfig.assurance`** section. `assurance.enabled` is derived from the environment flag and is
+  read-only: setting it in `graqle.yaml` raises `ConfigurationError` before env interpolation.
+- **`.env.example`** at the repo root listing every DAG variable name with placeholders (no tuning values).
+- **`docs/dag/ground-truth-addendum.md`** — the binding correction of the research charter's description
+  of 0.83.0 gating, with the SDK team's line-anchor verification notes.
+
+### Behaviour change when the flag is ON (opt-in only)
+
+- `GraqleConfig.from_yaml()` now fails closed with `ConfigurationError` if `GRAQLE_DAG_ENABLED` is on and
+  any required DAG setting is absent. No placeholder fallback exists for a security-critical value.
+
+## 0.84.0 (2026-09-14) — [Positioning: organisational intelligence + compliance packs as data]
+
+> Two user-facing changes and one packaging fix. The public pages now lead with **persistent
+> organisational intelligence** rather than EU-AI-Act-first governance; compliance frameworks
+> become **authorable as data**, with SOX/COSO shipping first; and the distribution manifests
+> stop drifting from the shipped version. No breaking changes — every API is unchanged.
+
+### Positioning (CR-README-01)
+
+- **The PyPI page finally renders the right file.** `pyproject.toml` pointed `readme` at the long
+  `README.md`, so the concise `README_PYPI.md` in the repo **never reached PyPI**. The pointer now
+  targets `README_PYPI.md`. If you have been reading the PyPI page, this is the first release where
+  it reflects what the repo actually says.
+- **New category framing.** Both READMEs and the package description lead with turning codebases,
+  documents, policies, decisions and workflows into a persistent typed knowledge graph. Governance
+  is re-ranked as the trust layer that makes that intelligence safe to act on, rather than the
+  headline. EU AI Act coverage is unchanged and fully retained — it now sits under
+  *Regulated deployments*, alongside SOX/COSO, ISO/IEC 42001 and GDPR claim limits.
+- **Two documented commands did not exist.** The quickstart published `graq learn "<text>"`, which
+  exits with `No such command` (`learn` is a command group). The correct form is
+  **`graq learn knowledge "<fact>"`**. A capability table published `graq lessons <domain>`, which
+  is not a command at all; the real surface is **`graq learned`**. Both are corrected, and every
+  command quoted in either README is now machine-checked against `graq --help`.
+- **Corrected counts.** The MCP tool count was published as "76+" and "74"; `graq mcp tools`
+  reports **85** `graq_` tools (each also aliased `kogni_*`). The backend list advertised
+  **14** including Azure OpenAI, which has no preset, no registry entry and no backend class —
+  the honest figure is **13 named backends plus any custom HTTP endpoint**.
+
+### Fixed
+
+- **A placeholder answer no longer reports a confidence score.** With no LLM backend configured,
+  the fallback backend returned `"[NO LLM CONFIGURED …] Placeholder analysis for this node.
+  Confidence: NN%"`. That number was random, and pairing it with placeholder text made an
+  unconfigured install indistinguishable from a governed answer at a glance. The fallback now
+  states plainly that no confidence score is reported. Configured backends are unaffected, and
+  the explicitly-scripted mock path still reports its confidence.
+
+### Compliance (CR-010.R3)
+
+- **Compliance packs are data, not code.** A regulatory framework is now a directory holding
+  `pack.yaml` plus its own `schema.json`. Adding the next framework — NIST AI RMF, ISO/IEC 42001,
+  SOC 2, HIPAA — requires **no Python and no engine change**. Packs load through
+  `graqle.compliance.packs` (`discover_packs()`, `load_pack()`, `load_all_packs()`) and each pack
+  is validated against its own schema in addition to proof-spec v1.0, because v1.0 permits unknown
+  members and therefore cannot check an extension namespace itself. A malformed pack **fails
+  closed, loudly** — it is never skipped with a warning.
+- **SOX / COSO ships first** (`x-sox`). Binds an AI-assisted decision to a named internal control,
+  a financial-statement assertion and a reporting period, so a decision taken during a financial
+  close is auditable offline. References SOX §302/§404 and COSO (2013 / ERM 2017). A typed
+  bootstrap lives at `graqle.pct.extensions.x_sox`.
+- **Management-review gate** (`graqle.compliance.management_review_gate`) — the SOX-vocabulary
+  counterpart of the Article 14 human-oversight gate: same mechanics, different words.
+- Discovery is a first-party packaged-directory scan by deliberate design — no entry points, so a
+  pack cannot arrive from an untrusted distribution as a side effect of installing an unrelated
+  library.
+
+### Packaging (CR-DIST-06)
+
+- **Distribution manifests no longer drift from the shipped version.** Five manifests
+  (`server.json`, both plugin manifests, both marketplace manifests) carried a hand-maintained
+  version that nothing updated — they reached `0.80.0` while PyPI served `0.83.0`, three releases
+  stale. `scripts/ci/sync_manifest_versions.py` now owns them, CI runs it on publish, and a test
+  asserts every manifest equals `graqle.__version__` at rest.
+- `server.json` was the subtler case: the registry workflow rewrote it *inside the CI checkout*, so
+  the published entry was always correct while the file in git stayed stale forever. The artifact
+  and the repo must now agree.
+- A pre-submission gate verifies that every listing asset a manifest references actually exists.
+
+---
+
 ## 0.83.0 (2026-07-30) — [Enterprise: scheduler contract + free-tier reasoning cap]
 
 > ### ⚠️ BREAKING CHANGE — free tier only
@@ -387,32 +482,6 @@ All notable changes to GraQle are documented in this file.
   `baseline.baseline_for_node`) instead of the flat `_DEFAULT_TOKENS_WITHOUT`.
   Behaviour only improves where a real file is found; otherwise it keeps the prior
   calibrated value (no regression).
-
----
-
-## 0.72.1 (2026-06-08) — [Authentic, model-aware "Cost Saved" metric]
-
-> The dashboard's **Cost Saved** figure is now a defensible number: real tokens
-> valued at the **real per-model price**, from a single dated source of truth —
-> not a hardcoded, model-agnostic flat rate.
-
-**Added**
-
-- **`graqle/pricing.py`** — the single source of truth for token pricing.
-  A dated per-model `$/1M` table (`PRICING_AS_OF`; Opus 4.x $5/$25, Sonnet
-  $3/$15, Haiku $1/$5), `cost_saved(tokens, model)` valued at the model's
-  **input** rate, a fail-safe `DEFAULT_MODEL` (Sonnet) for unknown ids, and
-  `pricing_basis()` so the UI can render the figure honestly (model + as-of date).
-
-**Changed**
-
-- **Eliminated three conflicting hardcoded cost rates** ($3/1M dashboard partial,
-  $15/1M `metrics.html`, $0.015/1K engine+dashboard). All now read
-  `pricing.cost_saved` via `MetricsEngine.get_summary()['cost_saved_usd']`.
-- **Cost is now model-aware.** `MetricsEngine.set_cost_model()` records the model
-  behind a saving (wired from reasoning), so the figure reflects the model the
-  user actually ran. At 88.2M tokens saved: $264.60 (Sonnet) / $441.00 (Opus 4.8)
-  / $88.20 (Haiku).
 
 ---
 
