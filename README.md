@@ -30,68 +30,80 @@ pip install graqle
 
 ## Why GraQle exists
 
-Your AI coding tool is good at generating code. It is bad at remembering.
+Your organisation already knows the answer. It just can't hand it to an AI.
 
-Every session it reconstructs your system from whatever files fit in the context window. It has never read the architecture decision you made last March, the incident that made you move validation into the service layer, or the policy that says refunds above a threshold need manager approval. That knowledge exists — in your repo, your docs, your decision records, your team's heads — but it isn't connected to anything, so it can't be reasoned over.
+The refund threshold lives in a policy document. The reason you retain records for seven years is in an ADR nobody re-reads. The incident that moved validation into the service layer is in someone's head. The dependency that makes payments fragile is in the code. Every one of those is real knowledge — and none of it is connected to any of the others, so no model can reason across it.
 
-GraQle builds that connection once and keeps it.
+Each AI session starts from zero and rebuilds a partial picture from whatever files fit in the context window. Then the window closes and the picture is gone.
 
-- **Architecture, not files.** AI assistants see files. GraQle sees relationships, dependencies and blast radius.
-- **Memory that compounds.** Lessons, decisions and documents become durable graph nodes instead of disappearing with a chat session.
+GraQle builds that connection once, keeps it, and grows it.
+
+- **Relationships, not files.** Assistants see documents and files. GraQle sees how a policy, a decision and the code that implements it relate — and what breaks when one of them changes.
+- **Memory that compounds.** Policies, decisions, lessons and architecture become durable graph nodes instead of disappearing with a chat session. Teach it once; every future session starts from there.
 - **Model independence.** Swap models, providers or IDEs without rebuilding the intelligence layer.
 
 ---
 
-## 90-second proof
+## 90-second proof — no code required
+
+Point GraQle at policies, ADRs, runbooks or specs. **Nothing else needed — this works on a folder with no code in it at all.**
 
 ```bash
 pip install graqle
 
-# 1. Scan a codebase into a typed knowledge graph
+# 1. Turn a folder of organisational documents into a typed graph
+graq scan docs ./policies
+# → 3 files → 12 nodes: 3 Document + 9 Section, linked by SECTION_OF
+
+# 2. Teach it a rule that lives in nobody's file
+graq learn knowledge "vendor DPA must be signed before any data access" --domain policy
+# → extracts the entity "DPA", then SEMANTICALLY_RELATED-links the rule to
+#   the vendor-onboarding document AND to its "Due diligence" section
+
+# 3. Ask across the whole body of knowledge
+graq run "what approval is needed for a large refund?"
+# → answer + confidence + evidence trail + the exact sections consulted
+
+# 4. Audit what the organisation has taught it
+graq learned
+```
+
+Step 2 is the one that compounds, and the one no amount of prompt engineering replaces: it needs a persistent typed graph as the substrate. GraQle found where that rule belonged on its own — you never told it which document to attach it to.
+
+Markdown, text, reStructuredText and AsciiDoc parse with the base install. PDF, DOCX, PPTX and XLSX need `pip install "graqle[docs]"` — without it those files are skipped and reported, never silently dropped.
+
+### The same graph, for code
+
+Where a codebase is part of the picture, it enters the same graph and connects to the documents that govern it:
+
+```bash
 graq scan repo .
 # → functions, classes, modules, imports, calls — architecture mapped in seconds
 
-# 2. Ask an architectural question, not a file question
 graq run "what breaks if I change the payment module?"
-# → activates the relevant subgraph, traces cross-file call + import chains
-# → returns: answer + confidence + evidence trail + active nodes
+# → traces cross-file call + import chains, activates the relevant subgraph
 
-# 3. Teach it something it cannot read from code
-graq learn knowledge "payment module must never call user service directly"
-# → persists as a graph node. Future reasoning activates this rule.
+graq impact payments.py        # blast radius before you touch anything
 ```
 
-That third command is the one that compounds. It is also the one no amount of prompt engineering replaces — it requires a persistent typed graph as the substrate.
-
-### Bring in the knowledge that isn't code
-
-```bash
-pip install "graqle[docs]"      # PDF / DOCX / PPTX / XLSX parsers
-
-# Ingest architecture docs, policies, ADRs, runbooks, specs
-graq scan docs ./docs
-graq learn doc ./policies/ ./decisions/architecture-review.docx
-# → Document + Section nodes, auto-linked to the code they describe
-```
-
-Markdown, text, reStructuredText and AsciiDoc parse with the base install. PDF, DOCX, PPTX and XLSX need the `[docs]` extra — without it those files are skipped and reported, never silently dropped.
+Software architecture is the deepest-mapped domain today — typed down to the function — and for engineering teams it is usually the fastest way to see the value. It is a wedge, not the boundary.
 
 ---
 
 ## The compounding advantage
 
-The first time you run GraQle, it knows your codebase. After a month, it knows your patterns. After a year, it holds the architectural lessons, decisions and document context your team accumulated — and activates them on the change that is about to repeat an old mistake.
+The first time you run GraQle, it knows what you gave it. After a month, it knows your patterns. After a year, it holds the policies, decisions, architectural lessons and document context your organisation accumulated — and activates the relevant ones on the work that is about to repeat an old mistake.
 
-This is the part that survives model churn. When you switch from one provider to another, or from one IDE to another, the graph is unchanged. You are not re-teaching a new model what your system is; you are pointing a different model at intelligence you already own.
+This is the part that survives model churn. When you switch provider or IDE, the graph is unchanged. You are not re-teaching a new model what your organisation knows; you are pointing a different model at intelligence you already own.
 
-> **Own the intelligence your models and agents create.** Enterprises can own their data and still lose the reasoning state accumulated inside external AI tools. The graph is a local file you control.
+> **Own the intelligence your models and agents create.** Enterprises can own their data and still lose the reasoning state accumulated inside external AI tools — the decisions, the corrections, the hard-won context. The graph is a local file you control.
 
 ---
 
 ## How it works
 
-1. **Scan** → AST + dependency analysis builds a typed graph (functions, classes, modules, imports, calls). Documents and policies enter the same graph as Document and Section nodes, auto-linked to the code they describe.
-2. **Connect** → Relationships become first-class: `IMPORTS`, `CALLS`, `DEFINES`, `SECTION_OF`. This is what makes cross-file reasoning possible.
+1. **Scan** → Documents, policies, ADRs and specs become Document and Section nodes. Codebases enter the same graph through AST + dependency analysis (functions, classes, modules, imports, calls). One substrate, whatever the source.
+2. **Connect** → Relationships become first-class: `SECTION_OF`, `SEMANTICALLY_RELATED`, `IMPORTS`, `CALLS`, `DEFINES`. Taught knowledge is auto-linked to the documents and code it concerns. This is what makes reasoning *across* sources possible.
 3. **Activate** → A pre-reasoning layer scores each node for relevance, confidence and risk **before** the LLM runs, so the model receives the relevant subgraph instead of the whole repository.
 4. **Reason** → Multiple agents debate. Outputs carry `confidence`, `graph_health`, `active_nodes` and evidence pointers.
 5. **Validate** → Answers below the confidence floor are refused rather than guessed.
@@ -143,13 +155,13 @@ Runs **fully offline** with Ollama or llama.cpp. Route different task types to d
 
 | Use case | Command |
 |:---|:---|
+| **Policies, ADRs and specs into the graph** | `graq scan docs ./policies` · `graq learn doc ./decisions/` |
+| **Institutional memory that outlives the session** | `graq learn knowledge "..."` · `graq learned` |
+| **Ask across documents, decisions and code at once** | `graq run "what approval is needed above the refund limit?"` |
+| Onboarding without a walkthrough | `graq run "how does checkout work end to end?"` |
 | Blast radius before a change | `graq impact payments.py` |
 | Cross-file security audit | `graq run "find every auth bypass risk"` |
-| Architecture Q&A for onboarding | `graq run "how does checkout work end to end?"` |
-| Institutional memory | `graq learn knowledge "..."` · `graq learned` |
-| Policy + document context | `graq scan docs ./docs` · `graq learn doc ./policies/` |
 | Pre-change safety check | `graq preflight "refactor the auth layer"` |
-| Combined risk read | `graq safety-check` |
 | CI/CD governance gate | `graq predict "..." --fail-below-threshold` |
 
 ---

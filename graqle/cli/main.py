@@ -523,7 +523,17 @@ def run(
     # Display results
     console.print("\n[bold green]Answer:[/bold green]")
     console.print(result.answer)
-    console.print(f"\n[dim]Confidence: {result.confidence:.0%} | "
+    # A placeholder answer must never carry a confidence figure. The fallback
+    # backend labels its text "NO LLM CONFIGURED", but printing a percentage
+    # underneath made an unconfigured install read like a governed answer.
+    # backend_status is NOT usable here: it is only ever set to "failed" on an
+    # exception (core/graph.py), so the fallback path leaves it at "ok".
+    _conf_display = (
+        "not reported (no LLM configured)"
+        if getattr(backend, "is_fallback", False)
+        else f"{result.confidence:.0%}"
+    )
+    console.print(f"\n[dim]Confidence: {_conf_display} | "
                   f"Rounds: {result.rounds_completed} | "
                   f"Nodes: {result.node_count} | "
                   f"Cost: ${result.cost_usd:.4f} | "
@@ -2381,7 +2391,14 @@ def safety_check_command(
             if not json_output:
                 from rich.markup import escape as rich_escape
                 console.print(f"  {rich_escape(result.answer[:300])}")
-                console.print(f"  [dim]Confidence: {result.confidence:.0%} | Cost: ${result.cost_usd:.4f}[/dim]")
+                # Same rule as `graq run`: no confidence figure on placeholder
+                # output from the silent no-backend-configured fallback.
+                _sc_conf = (
+                    "not reported (no LLM configured)"
+                    if getattr(backend, "is_fallback", False)
+                    else f"{result.confidence:.0%}"
+                )
+                console.print(f"  [dim]Confidence: {_sc_conf} | Cost: ${result.cost_usd:.4f}[/dim]")
         except Exception as exc:
             combined["reasoning"] = {"error": str(exc)[:200]}
             if not json_output:
@@ -2742,10 +2759,18 @@ def reason(
                 console.print(f"Q: [green]{rich_escape(q)}[/green]")
                 console.print(f"A: {rich_escape(r.answer[:500])}")
                 mode_color = "green" if r.reasoning_mode == "full" else "yellow"
-                console.print(f"[dim]Confidence: {r.confidence:.0%} | Cost: ${r.cost_usd:.4f} | "
+                # Same rule as the single-query path: no confidence figure
+                # on placeholder output from the fallback backend.
+                _conf = ("not reported (no LLM configured)"
+                         if getattr(backend, "is_fallback", False)
+                         else f"{r.confidence:.0%}")
+                console.print(f"[dim]Confidence: {_conf} | Cost: ${r.cost_usd:.4f} | "
                               f"Mode: [{mode_color}]{r.reasoning_mode}[/{mode_color}][/dim]")
+            _avg = ("not reported (no LLM configured)"
+                    if getattr(backend, "is_fallback", False)
+                    else f"{avg_confidence:.0%}")
             console.print(f"\n[bold]Batch Summary:[/bold] {len(queries)} queries | "
-                          f"Avg confidence: {avg_confidence:.0%} | "
+                          f"Avg confidence: {_avg} | "
                           f"Total cost: ${total_cost:.4f} | "
                           f"Total latency: {total_latency:.0f}ms")
         return
@@ -2799,10 +2824,23 @@ def reason(
         from rich.markup import escape as rich_escape
         console.print(f"\n[bold green]Answer:[/bold green] {rich_escape(result.answer)}")
         mode_color = "green" if result.reasoning_mode == "full" else "yellow"
-        console.print(f"[dim]Confidence: {result.confidence:.0%} | Rounds: {result.rounds_completed} | "
-                      f"Nodes: {result.node_count} | Cost: ${result.cost_usd:.4f} | "
-                      f"Latency: {result.latency_ms:.0f}ms | "
-                      f"Mode: [{mode_color}]{result.reasoning_mode}[/{mode_color}][/dim]")
+        # A placeholder answer must never carry a confidence figure. The
+        # fallback backend already labels its text as "NO LLM CONFIGURED",
+        # but printing "Confidence: 62%" underneath made an unconfigured
+        # install read like a governed answer at a glance. backend_status
+        # is NOT usable here — it is only ever set to "failed" on an
+        # exception, so the fallback path leaves it "ok".
+        if getattr(backend, "is_fallback", False):
+            console.print(f"[dim]Confidence: not reported (no LLM configured) | "
+                          f"Rounds: {result.rounds_completed} | "
+                          f"Nodes: {result.node_count} | Cost: ${result.cost_usd:.4f} | "
+                          f"Latency: {result.latency_ms:.0f}ms | "
+                          f"Mode: [{mode_color}]{result.reasoning_mode}[/{mode_color}][/dim]")
+        else:
+            console.print(f"[dim]Confidence: {result.confidence:.0%} | Rounds: {result.rounds_completed} | "
+                          f"Nodes: {result.node_count} | Cost: ${result.cost_usd:.4f} | "
+                          f"Latency: {result.latency_ms:.0f}ms | "
+                          f"Mode: [{mode_color}]{result.reasoning_mode}[/{mode_color}][/dim]")
 
 
 @app.command()
