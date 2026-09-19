@@ -8,6 +8,8 @@ pip install graqle
 
 Models change. Tools change. Your institutional knowledge should not.
 
+**Works with your stack today** — 13 LLM backends plus any custom HTTP endpoint (Anthropic, OpenAI, Bedrock, Ollama, Gemini, Groq, DeepSeek, Together, Mistral, OpenRouter, Fireworks, Cohere, llama.cpp), fully offline with Ollama or llama.cpp, and inside Claude Code, Cursor, VS Code + Copilot or Windsurf via **85 MCP tools**. Local-first: no telemetry, and your source never leaves your machine.
+
 ---
 
 ## 60-second proof — no code required
@@ -85,9 +87,9 @@ Documents become Document and Section nodes, linked by `SECTION_OF` — and to a
 
 ---
 
-## Works with your stack
+## Configuring your stack
 
-**13 LLM backends + any custom HTTP endpoint** — Anthropic, OpenAI, AWS Bedrock, Ollama, Gemini, Groq, DeepSeek, Together, Mistral, OpenRouter, Fireworks, Cohere, llama.cpp.
+Switching backend is one line — the graph is the constant, the model is a swappable input:
 
 ```yaml
 # graqle.yaml
@@ -96,12 +98,8 @@ model:
   model: llama3
 ```
 
-Runs fully offline with Ollama or llama.cpp. **Local-first: no telemetry, and your source never leaves your machine.**
-
-**Works with every AI IDE** — Claude Code, Cursor, VS Code + Copilot, Windsurf, via **85 MCP tools** your agent uses automatically.
-
 ```bash
-graq init    # detects your IDE and wires the tools
+graq init    # detects your IDE and wires the MCP tools
 ```
 
 ---

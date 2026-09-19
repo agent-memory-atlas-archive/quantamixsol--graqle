@@ -105,7 +105,7 @@ This is the part that survives model churn. When you switch provider or IDE, the
 1. **Scan** → Documents, policies, ADRs and specs become Document and Section nodes. Codebases enter the same graph through AST + dependency analysis (functions, classes, modules, imports, calls). One substrate, whatever the source.
 2. **Connect** → Relationships become first-class: `SECTION_OF`, `SEMANTICALLY_RELATED`, `IMPORTS`, `CALLS`, `DEFINES`. Taught knowledge is auto-linked to the documents and code it concerns. This is what makes reasoning *across* sources possible.
 3. **Activate** → A pre-reasoning layer scores each node for relevance, confidence and risk **before** the LLM runs, so the model receives the relevant subgraph instead of the whole repository.
-4. **Reason** → Multiple agents debate. Outputs carry `confidence`, `graph_health`, `active_nodes` and evidence pointers.
+4. **Reason** → Multiple agents debate. Outputs carry `confidence`, `graph_health`, `active_nodes` and evidence pointers. Debate is a reasoning mechanism, not a proof of truth: agents sharing a model family, a prompt template or a source document are correlated, so their agreement is not independent confirmation.
 5. **Validate** → Answers below the confidence floor are refused rather than guessed.
 6. **Learn** → Lessons, decisions and documents become durable graph knowledge that activates on future work.
 7. **Govern & commit** → When agents move from reading to writing, gates intercept write-class operations, and decisions can be cryptographically committed.
@@ -258,34 +258,15 @@ Same graph, same evidence model, same audit substrate. Most teams start with bui
 
 ## Regulated deployments
 
-If you operate in a regulated environment, the same substrate produces compliance evidence. If you don't, you can skip this section entirely — nothing above depends on it.
+If you operate in a regulated environment, the same substrate produces compliance evidence. If you don't, skip this section — nothing above depends on it.
 
 [![EU AI Act–aligned](https://img.shields.io/badge/EU%20AI%20Act-aligned-22c55e.svg)](./docs/compliance/eu-ai-act/)
 
-**GraQle is EU AI Act–aligned by design.** We give your high-risk AI system the signals, audit trail, and disclosure primitives you need to satisfy your own Article 9 risk-management file — without GraQle itself being subject to the high-risk obligations. Articles 6, 9, 12, 13, 14, 15, 25, 50 became applicable on 2026-08-02.
+**GraQle is EU AI Act–aligned by design** — signals, audit trail and disclosure primitives for your own Article 9 risk-management file. Articles 6, 9, 12, 13, 14, 15, 25, 50 became applicable on 2026-08-02. GraQle is **NOT** itself a high-risk AI system (no Annex III category applies) and is **NOT** a GPAI provider under Article 51; we provide evidence inputs, and never say *compliant* or *certified* — a CI invariant blocks any release that introduces such a field.
 
-```bash
-graq compliance switch on        # flips every EU-AI-Act-aware subsystem
-graq compliance status           # what's actually armed
-graq compliance export --since 2026-08-01 --sha256-sidecar   # Article 12 evidence
-```
+**Compliance packs are data, not code** — a framework is two files (`pack.yaml` + `schema.json`), no Python and no engine change. SOX/COSO ships today as `x-sox`; ISO/IEC 42001, NIST AI RMF, SOC 2 and HIPAA are authorable the same way. The claim-limits taxonomy records what each decision does **not** claim.
 
-**Three non-claims, kept legally clean:**
-
-- GraQle is **NOT** itself a high-risk AI system (no Annex III category applies).
-- GraQle is **NOT** a GPAI provider under Article 51 (we use third-party LLMs; we don't place one on the EU market).
-- We provide signals, audit primitives and conformity-assessment evidence inputs. We never say *compliant* or *certified* — a CI invariant blocks any release that introduces such a field.
-
-**Beyond the EU.** The evidence substrate is framework-neutral, and compliance packs are **data, not code** — a framework is two files (`pack.yaml` + `schema.json`), no Python and no engine change:
-
-- **SOX / COSO** — ships today as the `x-sox` pack: internal control IDs, financial-statement assertions, reporting periods, management review.
-- **ISO/IEC 42001** — Cl. 6.2 and Cl. 9.1 mapped through the baseline-document and periodic-assessment artefacts.
-- **GDPR** — `gdpr_processor_only` is a canonical claim limit on every record.
-- **NIST AI RMF, SOC 2, HIPAA and sector frameworks** — authorable as packs today; first-party packs and cross-framework mappings are open for contribution.
-
-The claim-limits taxonomy makes the *scope* of every decision explicit, so a downstream auditor can answer "what does this record **not** claim?" without guesswork.
-
-→ [Full Article-by-Article mapping](./docs/compliance/eu-ai-act/) · [How to contribute a mapping](./CONTRIBUTING-COMPLIANCE.md)
+→ [Article-by-Article mapping, CLI surface and evidence exports](./docs/compliance/eu-ai-act/) · [Contribute a mapping](./CONTRIBUTING-COMPLIANCE.md)
 
 ---
 
@@ -302,11 +283,11 @@ The free tier is real: the verifier, the runtime attestation path and the contin
 
 ---
 
-## Token economics
+## What you actually get back
 
-Activating a relevant subgraph costs fewer tokens than repeatedly feeding a model whole files. On a 50,000-node enterprise codebase, a sourced case study puts a 4-developer team at **−53%** against a flat-file baseline in year one, and **−88%** once local models carry the routine work.
+The durable return is not the token bill — inference prices keep falling. It is less context reconstruction, fewer architectural mistakes, faster change validation, team knowledge that outlives the session, easier model switching, and safer autonomy when agents start writing.
 
-Treat this as supporting evidence rather than the reason to adopt: inference prices keep falling, while context fragmentation and lost institutional knowledge do not.
+Token cost is supporting evidence for that, not the reason to adopt: activating a relevant subgraph costs fewer tokens than repeatedly feeding a model whole files. A sourced case study puts a 4-developer team on a 50,000-node codebase at **−53%** against a flat-file baseline in year one.
 
 → [Read the full case study](./docs/case-study-token-economics.md) — math, sources, and a snippet to re-run it on your own numbers.
 
@@ -314,11 +295,10 @@ Treat this as supporting evidence rather than the reason to adopt: inference pri
 
 ## Recent releases
 
-- **v0.83.0** — Scheduler contract for `graq rebuild` (`--headless` / `--json`, exit codes) + reasoning-quota metering.
-- **v0.75.0** — Optional EU AI Act layer, off by default, behind a tamper-evident irreversible latch.
+- **v0.84.0** — Documents, policies and decisions enter the same graph as code; compliance frameworks become authorable as data.
+- **v0.83.0** — Scheduler contract for `graq rebuild` (`--headless` / `--json`, exit codes).
 - **v0.73.0** — Cost is observability, never a quality gate: reasoning never truncates to save money.
 - **v0.72.0** — One constitution, every AI client (Claude Code, Codex, Cursor, Windsurf).
-- **v0.62.0** — `graqle govern serve` continuous anchoring worker + health snapshot.
 
 → [Full changelog](./CHANGELOG.md)
 
