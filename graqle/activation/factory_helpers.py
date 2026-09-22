@@ -173,10 +173,16 @@ def _make_cypher_activation(graph: Any) -> Any:
         )
         emb_engine = None
 
+    # CR-012 PR-012d (ruling N7): `strict` is plumbed from config so the kwarg
+    # is reachable in production, not just from tests. Absent config keeps the
+    # v0.83.0 default (False) — degrade, but loudly and visibly.
+    strict = bool(getattr(cfg.activation, "strict", False))
+
     return CypherActivation(
         connector=graph._neo4j_connector,
         embedding_engine=emb_engine,
         max_nodes=cfg.activation.max_nodes,
+        strict=strict,
     )
 
 

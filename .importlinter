@@ -1,0 +1,29 @@
+# CR-012 AC-21 — dependency direction for the DAG-2026 assurance layer.
+#
+# `graqle.assurance` may import `graqle.governance`; the reverse is forbidden.
+# This is why `GateVerdictRef` is duplicated in `governance/trace_schema.py`
+# with a str-typed `outcome` instead of importing the `GateOutcome` enum
+# (CR-012 §4.4, OQ-3). A parity test keeps the two shapes field-identical.
+#
+# Run locally:  lint-imports
+[importlinter]
+root_package = graqle
+
+[importlinter:contract:governance-not-import-assurance]
+name = graqle.governance must never import graqle.assurance
+type = forbidden
+source_modules =
+    graqle.governance
+forbidden_modules =
+    graqle.assurance
+# Ruling N5: `config/settings.py` reaches `graqle.assurance` ONLY from inside
+# function/property bodies (settings.py:812 AssuranceConfig.enabled,
+# :1188 _reject_yaml_derived, :1202 _validate_dag_flag), and
+# `governance.kg_write_gate` imports `config.settings` only under
+# TYPE_CHECKING. import-linter's static graph counts those lazy edges, but at
+# RUNTIME importing graqle.governance loads no graqle.assurance module — which
+# is the invariant N5 actually specifies and what the CR's import-graph tests
+# assert. `tests/test_assurance/test_import_direction.py` proves it at runtime;
+# this contract catches any EAGER, module-level import.
+ignore_imports =
+    graqle.config.settings -> graqle.assurance.settings

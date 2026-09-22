@@ -27,6 +27,28 @@ class GraqleConfigError(GraqleError):
     """
 
 
+#: CR-012 / PR-012b (ruling N5 + R-C): the single DAG feature flag name lives
+#: here, not in ``graqle.assurance``. ``graqle/config/settings.py`` reads it on
+#: the flag-OFF path without importing the assurance package, which is what
+#: keeps ``graqle.assurance`` out of the import graph of every pre-existing
+#: module when the flag is off.
+ENV_FLAG = "GRAQLE_DAG_ENABLED"
+
+
+class ConfigurationError(GraqleConfigError):
+    """Raised on DAG flag mismatch, on a missing required DAG setting while the
+    flag is on, or on an invalid value. Never a silent placeholder fallback.
+
+    Ruling R-C (2026-09-15): this inherits :class:`GraqleConfigError` so that a
+    caller catching the broad config-error class also catches a DAG config
+    failure. It is re-exported from ``graqle.assurance.settings`` so existing
+    imports keep working.
+
+    Messages carry setting NAMES only -- never the offending value -- so a
+    rejected private value cannot leak through logs (Senior chain 4).
+    """
+
+
 class ConfigNotFoundError(GraqleConfigError):
     """Raised when ``graqle.yaml`` could not be found within the ancestor walk.
 

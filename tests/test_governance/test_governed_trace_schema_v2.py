@@ -70,8 +70,10 @@ def _minimal_trace(**overrides) -> GovernedTrace:
 class TestModuleConstants:
     """Pin the public constants that downstream tooling depends on."""
 
-    def test_current_schema_version_is_2(self):
-        assert CURRENT_SCHEMA_VERSION == "2"
+    def test_current_schema_version_is_3(self):
+        # CR-012 PR-012b bumped the writer version to "3" (additive `assurance`
+        # field). Readers still accept "1" and "2" via read_trace().
+        assert CURRENT_SCHEMA_VERSION == "3"
 
     def test_legacy_policy_version_sentinel_value(self):
         # The exact sentinel string is part of the public OPSF Use B contract;
@@ -93,7 +95,7 @@ class TestModuleConstants:
 class TestSchemaVersionField:
     def test_default_is_current_schema_version(self):
         t = _minimal_trace()
-        assert t.schema_version == "2"
+        assert t.schema_version == "3"
         assert t.schema_version == CURRENT_SCHEMA_VERSION
 
     def test_explicit_value_accepted(self):
@@ -104,19 +106,19 @@ class TestSchemaVersionField:
     def test_appears_in_to_internal_dict(self):
         t = _minimal_trace()
         d = t.to_internal_dict()
-        assert d["schema_version"] == "2"
+        assert d["schema_version"] == "3"
 
     def test_appears_in_to_public_dict(self):
         # Public serialization must include schema_version (not gated by TS-2).
         t = _minimal_trace()
         d = t.to_public_dict()
-        assert d["schema_version"] == "2"
+        assert d["schema_version"] == "3"
 
     def test_appears_in_json_roundtrip(self):
         t = _minimal_trace()
         encoded = json.dumps(t.to_internal_dict(), default=str)
         parsed = json.loads(encoded)
-        assert parsed["schema_version"] == "2"
+        assert parsed["schema_version"] == "3"
 
 
 # -------------------------------------------------------------------------
@@ -260,6 +262,8 @@ class TestSchemaVersionAndPolicyVersionInteraction:
         # A v2 record from an issuer that has not yet generated a baseline.
         t = _minimal_trace(schema_version="2", policy_version=None)
         d = t.to_internal_dict()
+        # An EXPLICIT version survives serialisation unchanged (the v3 default
+        # applies only when the caller supplies none).
         assert d["schema_version"] == "2"
         assert d["policy_version"] is None
 

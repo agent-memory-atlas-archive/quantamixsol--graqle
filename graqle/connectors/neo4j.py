@@ -169,8 +169,18 @@ class Neo4jConnector(BaseConnector):
             for record in result:
                 nid = str(record["id"])
                 props = dict(record.get("properties", {}))
-                # Remove keys already extracted to avoid duplication
-                for k in ("id", "label", "entity_type", "description"):
+                # Remove keys already extracted to avoid duplication.
+                #
+                # CR-012 PR-012c (rulings process note 1): `type` MUST be in
+                # this list. The node query aliases `n.entity_type AS type`, so
+                # a node that ALSO carries a literal `type` property leaves it
+                # in `props`; `Graqle.to_networkx` then calls
+                # `G.add_node(nid, ..., type=node.entity_type, **node.properties)`
+                # and Python raises "got multiple values for keyword argument
+                # 'type'". 0.79.0 tolerated it; the 0.83.0 hydrator collides.
+                # The writer already excludes the same keys (see `save`), so
+                # this restores symmetry between the read and write paths.
+                for k in ("id", "label", "entity_type", "description", "type"):
                     props.pop(k, None)
                 nodes[nid] = {
                     "label": record.get("label") or nid,
@@ -688,6 +698,64 @@ class Neo4jConnector(BaseConnector):
         return performed_flip
 
     # --- Vector search ---
+
+    def probe_vector_index(self) -> dict[str, Any]:
+        """Report whether semantic activation can actually run here.
+
+        CR-012 PR-012d (ruling N7). ``vector_search`` cannot distinguish an
+        ABSENT index from a present index that simply matched nothing — the
+        driver surfaces both to a bare ``except`` identically. This probe
+        separates them so the caller can raise a typed
+        :class:`~graqle.core.exceptions.VectorIndexMissingError` instead of
+        silently falling back to the whole graph.
+
+        Never raises: on any driver/query failure it returns
+        ``{"usable": False, "index_state": None, ...}`` with ``error`` set, so
+        a health probe or ``graq doctor`` line can report the degradation
+        rather than crash on it.
+
+        Returns a dict with ``index_name``, ``database``, ``index_state``
+        (``"ONLINE"`` / ``"POPULATING"`` / ``"NOT_FOUND"`` / ``None``),
+        ``chunks_total``, ``chunks_embedded`` and ``usable``. ``usable`` is
+        True only when the index is ONLINE **and** at least one chunk carries
+        an embedding — a chunk set with zero embeddings is exactly the D1
+        failure mode, where the index exists but can never match.
+        """
+        info: dict[str, Any] = {
+            "index_name": self._vector_index_name,
+            "database": self._database,
+            "index_state": None,
+            "chunks_total": None,
+            "chunks_embedded": None,
+            "usable": False,
+        }
+        try:
+            driver = self._get_driver()
+            with driver.session(database=self._database) as session:
+                record = session.run(
+                    "SHOW INDEXES YIELD name, state "
+                    "WHERE name = $idx RETURN state",
+                    idx=self._vector_index_name,
+                ).single()
+                info["index_state"] = record["state"] if record else "NOT_FOUND"
+
+                counts = session.run(
+                    "MATCH (c:Chunk) "
+                    "RETURN count(c) AS total, "
+                    "count(c.embedding) AS embedded"
+                ).single()
+                if counts is not None:
+                    info["chunks_total"] = int(counts["total"])
+                    info["chunks_embedded"] = int(counts["embedded"])
+        except Exception as exc:  # noqa: BLE001 — probe must never raise
+            info["error"] = str(exc)
+            return info
+
+        info["usable"] = (
+            info["index_state"] == "ONLINE"
+            and (info["chunks_embedded"] or 0) > 0
+        )
+        return info
 
     def vector_search(
         self,

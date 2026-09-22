@@ -611,6 +611,64 @@ def _check_skill_system() -> list[CheckResult]:
     return results
 
 
+def _check_neo4j_activation(cfg: dict) -> list[CheckResult]:
+    """CR-012 PR-012d (ruling N7) — can semantic activation actually run?
+
+    Reports vector-index state and chunk-embedding coverage for neo4j-first
+    projects. Deliberately a standalone function so it is reachable even when
+    the optional ``neo4j`` driver is absent: a missing driver means activation
+    cannot run, which is information the operator needs, not a reason to stay
+    silent.
+
+    Never raises — every failure mode becomes a row.
+    """
+    graph_cfg = cfg.get("graph", {}) if isinstance(cfg, dict) else {}
+    try:
+        from graqle.connectors.neo4j import Neo4jConnector
+    except ImportError:
+        return [(
+            FAIL,
+            "Neo4j: activation",
+            "neo4j driver not installed — semantic activation cannot run; "
+            "install graqle[neo4j]",
+        )]
+
+    try:
+        connector = Neo4jConnector(
+            uri=graph_cfg.get("uri", "bolt://localhost:7687"),
+            username=graph_cfg.get("username", "neo4j"),
+            password=graph_cfg.get("password", ""),
+            database=graph_cfg.get("database", "neo4j"),
+        )
+        try:
+            probe = connector.probe_vector_index()
+        finally:
+            close = getattr(connector, "close", None)
+            if callable(close):
+                close()
+    except Exception as exc:  # noqa: BLE001 — a doctor check never crashes
+        return [(WARN, "Neo4j: activation", f"probe failed ({exc})")]
+
+    state = probe.get("index_state") or "unknown"
+    total = probe.get("chunks_total")
+    embedded = probe.get("chunks_embedded")
+    coverage = (
+        f"{embedded}/{total} chunks embedded"
+        if isinstance(total, int) and isinstance(embedded, int)
+        else "coverage unknown"
+    )
+    detail = f"index {probe.get('index_name')} {state}; {coverage}"
+
+    if probe.get("usable"):
+        return [(PASS, "Neo4j: activation", detail)]
+    return [(
+        FAIL,
+        "Neo4j: activation",
+        f"{detail} — semantic activation CANNOT run; results would fall back "
+        f"to the full graph",
+    )]
+
+
 def _check_neo4j_backend() -> list[CheckResult]:
     """Check Neo4j availability and show latency comparison."""
     import json
@@ -668,6 +726,20 @@ def _check_neo4j_backend() -> list[CheckResult]:
             results.append((FAIL, "Backend: Neo4j", "configured but neo4j driver not installed"))
         except Exception as e:
             results.append((WARN, "Backend: Neo4j", f"configured but connection failed: {e}"))
+
+        # CR-012 PR-012d (ruling N7): on a neo4j-first project, report whether
+        # semantic activation can actually run. A missing vector index or zero
+        # chunk embeddings means every retrieval-dependent answer is produced
+        # from a substrate that cannot activate — the defect that previously
+        # showed up nowhere.
+        #
+        # This sits OUTSIDE the driver-dependent try/except above on purpose.
+        # `from neo4j import GraphDatabase` raises ImportError wherever the
+        # optional [neo4j] extra is absent (CI installs only [dev]), which
+        # aborted the whole block and silently skipped this line — the exact
+        # class of invisible gap ruling N7 exists to close. A missing driver is
+        # itself a reportable answer: activation cannot run without it.
+        results.extend(_check_neo4j_activation(cfg if isinstance(cfg, dict) else {}))
     else:
         # On JSON/NetworkX — show upgrade opportunity
         results.append((INFO, "Backend: JSON", "using file-based graph"))

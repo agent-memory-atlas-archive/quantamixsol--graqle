@@ -38,6 +38,68 @@ class EmbeddingDimensionMismatchError(GraqleError):
         self.active_dim = active_dim
 
 
+class VectorIndexMissingError(GraqleError):
+    """Raised when semantic activation cannot run because the backing vector
+    index is absent, offline, or carries no usable embeddings.
+
+    CR-012 PR-012d (ruling N7). Before this existed, a neo4j-first project whose
+    substrate had no vector index (or zero chunk embeddings) degraded SILENTLY:
+    ``vector_search`` raised deep inside the driver, the activator caught the
+    bare ``Exception``, logged at WARNING, and returned the whole graph. Every
+    retrieval-dependent answer was then produced from a substrate that could not
+    activate, with no error and no signal in ``graph_health`` or ``graq doctor``.
+
+    The failure is now typed so callers can distinguish "the index is missing"
+    from "the index is fine and matched nothing" — two conditions the driver
+    reports identically to a bare ``except``.
+
+    Raised only when ``strict=True`` is passed to the activation entry point.
+    The default remains non-raising to preserve v0.83.0 behaviour, but the
+    degraded path now logs at ERROR and is visible in ``graph_health``.
+
+    Recovery:
+        Create the vector index and embed the chunks, e.g.
+        ``graq doctor`` reports the index state and chunk embedding coverage.
+    """
+
+    def __init__(
+        self,
+        *,
+        index_name: str,
+        database: str | None = None,
+        index_state: str | None = None,
+        chunks_total: int | None = None,
+        chunks_embedded: int | None = None,
+    ) -> None:
+        self.index_name = index_name
+        self.database = database
+        self.index_state = index_state
+        self.chunks_total = chunks_total
+        self.chunks_embedded = chunks_embedded
+
+        where = f" in database {database!r}" if database else ""
+        if index_state in (None, "NOT_FOUND"):
+            cause = f"vector index {index_name!r} not found{where}"
+        elif index_state != "ONLINE":
+            cause = f"vector index {index_name!r} is {index_state}{where}"
+        else:
+            cause = f"vector index {index_name!r} has no usable embeddings{where}"
+
+        coverage = ""
+        if chunks_total is not None and chunks_embedded is not None:
+            coverage = (
+                f" Chunk embedding coverage: {chunks_embedded}/{chunks_total}."
+            )
+
+        super().__init__(
+            f"Semantic activation unavailable: {cause}.{coverage} "
+            f"Activation would silently fall back to the full graph, so every "
+            f"retrieval-dependent result would come from a substrate that "
+            f"cannot activate. Run 'graq doctor' for index state and chunk "
+            f"embedding coverage."
+        )
+
+
 class GovernanceViolation(GraqleError):
     """Policy violation (clearance laundering, taint escalation, redaction bypass).
 

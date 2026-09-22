@@ -135,6 +135,7 @@ class TraceStore:
         self,
         date: str | None = None,
         limit: int = 100,
+        validate: bool = False,
     ) -> list[dict[str, Any]]:
         """Read traces from a daily JSONL file.
 
@@ -144,6 +145,13 @@ class TraceStore:
             ISO date string (YYYY-MM-DD). Defaults to today (UTC).
         limit:
             Maximum number of traces to return (most recent first).
+        validate:
+            CR-012 PR-012b. When True, every record is routed through
+            :func:`graqle.governance.trace_schema.read_trace`, which validates
+            it against the schema version it was WRITTEN under and raises
+            ``ValueError`` on a malformed record. Default False preserves the
+            v0.83.0 behaviour exactly: raw dicts, no validation, corrupt lines
+            skipped with a warning.
 
         Returns
         -------

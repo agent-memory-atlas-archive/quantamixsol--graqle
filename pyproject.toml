@@ -18,7 +18,7 @@ name = "graqle"
 # (first-to-finish/best-of-N) + CostAwareRouter (auto cost/latency selection) —
 # dual-provider autonomy. 0.77.0 = ADR-239 Stage 2
 # (CheckpointProtocol + run_tests). 0.76.0 = ADR-225 G1 multi-tenant memory.
-version = "0.84.0"
+version = "0.84.1"
 description = "Persistent organisational intelligence for AI agents. Turn codebases, documents, policies and decisions into a knowledge graph so Claude Code, Cursor and Copilot reason over architecture, dependencies and prior lessons — with confidence scores and evidence. 13 LLM backends + custom, fully offline capable."
 readme = "README_PYPI.md"
 license = {text = "Apache-2.0"}
@@ -165,6 +165,7 @@ dev = [
     "pytest-cov>=4.0",
     "mypy>=1.0",
     "ruff>=0.1",
+    "import-linter>=2.0",
     "coverage>=7.0",
     "httpx>=0.25",
     "boto3>=1.28",

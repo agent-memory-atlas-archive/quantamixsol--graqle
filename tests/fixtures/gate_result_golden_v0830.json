@@ -1,0 +1,1418 @@
+[
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ x = 1",
+      "radius": 0,
+      "risk": "LOW"
+    },
+    "out": {
+      "blocked": false,
+      "bypass_allowed": true,
+      "gate_score": 0.0,
+      "impact_radius": 0,
+      "reason": "T1: Auto-pass (low risk, low impact radius). Logged.",
+      "requires_approval": false,
+      "risk_level": "LOW",
+      "tier": "T1",
+      "warnings": []
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ x = 1",
+      "radius": 0,
+      "risk": "LOW"
+    },
+    "out": {
+      "blocked": false,
+      "bypass_allowed": true,
+      "gate_score": 0.0,
+      "impact_radius": 0,
+      "reason": "T1: Auto-pass (low risk, low impact radius). Logged.",
+      "requires_approval": false,
+      "risk_level": "LOW",
+      "tier": "T1",
+      "warnings": []
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 0,
+      "risk": "LOW"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 0,
+      "reason": "T3: Explicit approval required. risk_level=LOW, impact_radius=0, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "LOW",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 0,
+      "risk": "LOW"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 0,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "LOW",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ x = 1",
+      "radius": 2,
+      "risk": "LOW"
+    },
+    "out": {
+      "blocked": false,
+      "bypass_allowed": true,
+      "gate_score": 0.0385,
+      "impact_radius": 2,
+      "reason": "T1: Auto-pass (low risk, low impact radius). Logged.",
+      "requires_approval": false,
+      "risk_level": "LOW",
+      "tier": "T1",
+      "warnings": []
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ x = 1",
+      "radius": 2,
+      "risk": "LOW"
+    },
+    "out": {
+      "blocked": false,
+      "bypass_allowed": true,
+      "gate_score": 0.0385,
+      "impact_radius": 2,
+      "reason": "T1: Auto-pass (low risk, low impact radius). Logged.",
+      "requires_approval": false,
+      "risk_level": "LOW",
+      "tier": "T1",
+      "warnings": []
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 2,
+      "risk": "LOW"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 2,
+      "reason": "T3: Explicit approval required. risk_level=LOW, impact_radius=2, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "LOW",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 2,
+      "risk": "LOW"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 2,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "LOW",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ x = 1",
+      "radius": 3,
+      "risk": "LOW"
+    },
+    "out": {
+      "blocked": false,
+      "bypass_allowed": true,
+      "gate_score": 0.0577,
+      "impact_radius": 3,
+      "reason": "T2: Gate score 0.06 below threshold 0.70. Passing.",
+      "requires_approval": false,
+      "risk_level": "LOW",
+      "tier": "T2",
+      "warnings": [
+        "RBAC advisory: Actor 'alice' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T2."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ x = 1",
+      "radius": 3,
+      "risk": "LOW"
+    },
+    "out": {
+      "blocked": false,
+      "bypass_allowed": true,
+      "gate_score": 0.0577,
+      "impact_radius": 3,
+      "reason": "T2: Gate score 0.06 below threshold 0.70. Passing.",
+      "requires_approval": false,
+      "risk_level": "LOW",
+      "tier": "T2",
+      "warnings": [
+        "RBAC advisory: Actor 'alice' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T2."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 3,
+      "risk": "LOW"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 3,
+      "reason": "T3: Explicit approval required. risk_level=LOW, impact_radius=3, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "LOW",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 3,
+      "risk": "LOW"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 3,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "LOW",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ x = 1",
+      "radius": 15,
+      "risk": "LOW"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 15,
+      "reason": "T3: Explicit approval required. risk_level=LOW, impact_radius=15, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "LOW",
+      "tier": "T3",
+      "warnings": [
+        "Anti-gaming: cumulative impact_radius 15 exceeds cap 10 in 24h window. T3 required regardless of individual change size."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ x = 1",
+      "radius": 15,
+      "risk": "LOW"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 15,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "LOW",
+      "tier": "T3",
+      "warnings": [
+        "Anti-gaming: cumulative impact_radius 15 exceeds cap 10 in 24h window. T3 required regardless of individual change size."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 15,
+      "risk": "LOW"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 15,
+      "reason": "T3: Explicit approval required. risk_level=LOW, impact_radius=15, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "LOW",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3",
+        "Anti-gaming: cumulative impact_radius 15 exceeds cap 10 in 24h window. T3 required regardless of individual change size."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 15,
+      "risk": "LOW"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 15,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "LOW",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3",
+        "Anti-gaming: cumulative impact_radius 15 exceeds cap 10 in 24h window. T3 required regardless of individual change size."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ x = 1",
+      "radius": 0,
+      "risk": "MEDIUM"
+    },
+    "out": {
+      "blocked": false,
+      "bypass_allowed": true,
+      "gate_score": 0.1667,
+      "impact_radius": 0,
+      "reason": "T2: Gate score 0.17 below threshold 0.70. Passing.",
+      "requires_approval": false,
+      "risk_level": "MEDIUM",
+      "tier": "T2",
+      "warnings": [
+        "RBAC advisory: Actor 'alice' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T2."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ x = 1",
+      "radius": 0,
+      "risk": "MEDIUM"
+    },
+    "out": {
+      "blocked": false,
+      "bypass_allowed": true,
+      "gate_score": 0.1667,
+      "impact_radius": 0,
+      "reason": "T2: Gate score 0.17 below threshold 0.70. Passing.",
+      "requires_approval": false,
+      "risk_level": "MEDIUM",
+      "tier": "T2",
+      "warnings": [
+        "RBAC advisory: Actor 'alice' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T2."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 0,
+      "risk": "MEDIUM"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 0,
+      "reason": "T3: Explicit approval required. risk_level=MEDIUM, impact_radius=0, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "MEDIUM",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 0,
+      "risk": "MEDIUM"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 0,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "MEDIUM",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ x = 1",
+      "radius": 2,
+      "risk": "MEDIUM"
+    },
+    "out": {
+      "blocked": false,
+      "bypass_allowed": true,
+      "gate_score": 0.2051,
+      "impact_radius": 2,
+      "reason": "T2: Gate score 0.21 below threshold 0.70. Passing.",
+      "requires_approval": false,
+      "risk_level": "MEDIUM",
+      "tier": "T2",
+      "warnings": [
+        "RBAC advisory: Actor 'alice' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T2."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ x = 1",
+      "radius": 2,
+      "risk": "MEDIUM"
+    },
+    "out": {
+      "blocked": false,
+      "bypass_allowed": true,
+      "gate_score": 0.2051,
+      "impact_radius": 2,
+      "reason": "T2: Gate score 0.21 below threshold 0.70. Passing.",
+      "requires_approval": false,
+      "risk_level": "MEDIUM",
+      "tier": "T2",
+      "warnings": [
+        "RBAC advisory: Actor 'alice' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T2."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 2,
+      "risk": "MEDIUM"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 2,
+      "reason": "T3: Explicit approval required. risk_level=MEDIUM, impact_radius=2, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "MEDIUM",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 2,
+      "risk": "MEDIUM"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 2,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "MEDIUM",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ x = 1",
+      "radius": 3,
+      "risk": "MEDIUM"
+    },
+    "out": {
+      "blocked": false,
+      "bypass_allowed": true,
+      "gate_score": 0.2244,
+      "impact_radius": 3,
+      "reason": "T2: Gate score 0.22 below threshold 0.70. Passing.",
+      "requires_approval": false,
+      "risk_level": "MEDIUM",
+      "tier": "T2",
+      "warnings": [
+        "RBAC advisory: Actor 'alice' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T2."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ x = 1",
+      "radius": 3,
+      "risk": "MEDIUM"
+    },
+    "out": {
+      "blocked": false,
+      "bypass_allowed": true,
+      "gate_score": 0.2244,
+      "impact_radius": 3,
+      "reason": "T2: Gate score 0.22 below threshold 0.70. Passing.",
+      "requires_approval": false,
+      "risk_level": "MEDIUM",
+      "tier": "T2",
+      "warnings": [
+        "RBAC advisory: Actor 'alice' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T2."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 3,
+      "risk": "MEDIUM"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 3,
+      "reason": "T3: Explicit approval required. risk_level=MEDIUM, impact_radius=3, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "MEDIUM",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 3,
+      "risk": "MEDIUM"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 3,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "MEDIUM",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ x = 1",
+      "radius": 15,
+      "risk": "MEDIUM"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 15,
+      "reason": "T3: Explicit approval required. risk_level=MEDIUM, impact_radius=15, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "MEDIUM",
+      "tier": "T3",
+      "warnings": [
+        "Anti-gaming: cumulative impact_radius 15 exceeds cap 10 in 24h window. T3 required regardless of individual change size."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ x = 1",
+      "radius": 15,
+      "risk": "MEDIUM"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 15,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "MEDIUM",
+      "tier": "T3",
+      "warnings": [
+        "Anti-gaming: cumulative impact_radius 15 exceeds cap 10 in 24h window. T3 required regardless of individual change size."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 15,
+      "risk": "MEDIUM"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 15,
+      "reason": "T3: Explicit approval required. risk_level=MEDIUM, impact_radius=15, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "MEDIUM",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3",
+        "Anti-gaming: cumulative impact_radius 15 exceeds cap 10 in 24h window. T3 required regardless of individual change size."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 15,
+      "risk": "MEDIUM"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 15,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "MEDIUM",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3",
+        "Anti-gaming: cumulative impact_radius 15 exceeds cap 10 in 24h window. T3 required regardless of individual change size."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ x = 1",
+      "radius": 0,
+      "risk": "HIGH"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.3333,
+      "impact_radius": 0,
+      "reason": "T3: Explicit approval required. risk_level=HIGH, impact_radius=0, gate_score=0.33. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "HIGH",
+      "tier": "T3",
+      "warnings": []
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ x = 1",
+      "radius": 0,
+      "risk": "HIGH"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.3333,
+      "impact_radius": 0,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "HIGH",
+      "tier": "T3",
+      "warnings": []
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 0,
+      "risk": "HIGH"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 0,
+      "reason": "T3: Explicit approval required. risk_level=HIGH, impact_radius=0, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "HIGH",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 0,
+      "risk": "HIGH"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 0,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "HIGH",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ x = 1",
+      "radius": 2,
+      "risk": "HIGH"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.3718,
+      "impact_radius": 2,
+      "reason": "T3: Explicit approval required. risk_level=HIGH, impact_radius=2, gate_score=0.37. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "HIGH",
+      "tier": "T3",
+      "warnings": []
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ x = 1",
+      "radius": 2,
+      "risk": "HIGH"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.3718,
+      "impact_radius": 2,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "HIGH",
+      "tier": "T3",
+      "warnings": []
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 2,
+      "risk": "HIGH"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 2,
+      "reason": "T3: Explicit approval required. risk_level=HIGH, impact_radius=2, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "HIGH",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 2,
+      "risk": "HIGH"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 2,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "HIGH",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ x = 1",
+      "radius": 3,
+      "risk": "HIGH"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.391,
+      "impact_radius": 3,
+      "reason": "T3: Explicit approval required. risk_level=HIGH, impact_radius=3, gate_score=0.39. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "HIGH",
+      "tier": "T3",
+      "warnings": []
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ x = 1",
+      "radius": 3,
+      "risk": "HIGH"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.391,
+      "impact_radius": 3,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "HIGH",
+      "tier": "T3",
+      "warnings": []
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 3,
+      "risk": "HIGH"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 3,
+      "reason": "T3: Explicit approval required. risk_level=HIGH, impact_radius=3, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "HIGH",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 3,
+      "risk": "HIGH"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 3,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "HIGH",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ x = 1",
+      "radius": 15,
+      "risk": "HIGH"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 15,
+      "reason": "T3: Explicit approval required. risk_level=HIGH, impact_radius=15, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "HIGH",
+      "tier": "T3",
+      "warnings": [
+        "Anti-gaming: cumulative impact_radius 15 exceeds cap 10 in 24h window. T3 required regardless of individual change size."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ x = 1",
+      "radius": 15,
+      "risk": "HIGH"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 15,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "HIGH",
+      "tier": "T3",
+      "warnings": [
+        "Anti-gaming: cumulative impact_radius 15 exceeds cap 10 in 24h window. T3 required regardless of individual change size."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 15,
+      "risk": "HIGH"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 15,
+      "reason": "T3: Explicit approval required. risk_level=HIGH, impact_radius=15, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "HIGH",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3",
+        "Anti-gaming: cumulative impact_radius 15 exceeds cap 10 in 24h window. T3 required regardless of individual change size."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 15,
+      "risk": "HIGH"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 15,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "HIGH",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3",
+        "Anti-gaming: cumulative impact_radius 15 exceeds cap 10 in 24h window. T3 required regardless of individual change size."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ x = 1",
+      "radius": 0,
+      "risk": "CRITICAL"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.5,
+      "impact_radius": 0,
+      "reason": "T3: Explicit approval required. risk_level=CRITICAL, impact_radius=0, gate_score=0.50. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "CRITICAL",
+      "tier": "T3",
+      "warnings": []
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ x = 1",
+      "radius": 0,
+      "risk": "CRITICAL"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.5,
+      "impact_radius": 0,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "CRITICAL",
+      "tier": "T3",
+      "warnings": []
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 0,
+      "risk": "CRITICAL"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 0,
+      "reason": "T3: Explicit approval required. risk_level=CRITICAL, impact_radius=0, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "CRITICAL",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 0,
+      "risk": "CRITICAL"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 0,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "CRITICAL",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ x = 1",
+      "radius": 2,
+      "risk": "CRITICAL"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.5385,
+      "impact_radius": 2,
+      "reason": "T3: Explicit approval required. risk_level=CRITICAL, impact_radius=2, gate_score=0.54. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "CRITICAL",
+      "tier": "T3",
+      "warnings": []
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ x = 1",
+      "radius": 2,
+      "risk": "CRITICAL"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.5385,
+      "impact_radius": 2,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "CRITICAL",
+      "tier": "T3",
+      "warnings": []
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 2,
+      "risk": "CRITICAL"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 2,
+      "reason": "T3: Explicit approval required. risk_level=CRITICAL, impact_radius=2, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "CRITICAL",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 2,
+      "risk": "CRITICAL"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 2,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "CRITICAL",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ x = 1",
+      "radius": 3,
+      "risk": "CRITICAL"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.5577,
+      "impact_radius": 3,
+      "reason": "T3: Explicit approval required. risk_level=CRITICAL, impact_radius=3, gate_score=0.56. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "CRITICAL",
+      "tier": "T3",
+      "warnings": []
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ x = 1",
+      "radius": 3,
+      "risk": "CRITICAL"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.5577,
+      "impact_radius": 3,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "CRITICAL",
+      "tier": "T3",
+      "warnings": []
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 3,
+      "risk": "CRITICAL"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 3,
+      "reason": "T3: Explicit approval required. risk_level=CRITICAL, impact_radius=3, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "CRITICAL",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 3,
+      "risk": "CRITICAL"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 3,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "CRITICAL",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3"
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ x = 1",
+      "radius": 15,
+      "risk": "CRITICAL"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 15,
+      "reason": "T3: Explicit approval required. risk_level=CRITICAL, impact_radius=15, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "CRITICAL",
+      "tier": "T3",
+      "warnings": [
+        "Anti-gaming: cumulative impact_radius 15 exceeds cap 10 in 24h window. T3 required regardless of individual change size."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ x = 1",
+      "radius": 15,
+      "risk": "CRITICAL"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 15,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "CRITICAL",
+      "tier": "T3",
+      "warnings": [
+        "Anti-gaming: cumulative impact_radius 15 exceeds cap 10 in 24h window. T3 required regardless of individual change size."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 15,
+      "risk": "CRITICAL"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 15,
+      "reason": "T3: Explicit approval required. risk_level=CRITICAL, impact_radius=15, gate_score=0.91. Pass approved_by='your-name' with a justification.",
+      "requires_approval": true,
+      "risk_level": "CRITICAL",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3",
+        "Anti-gaming: cumulative impact_radius 15 exceeds cap 10 in 24h window. T3 required regardless of individual change size."
+      ]
+    }
+  },
+  {
+    "in": {
+      "actor": "alice",
+      "approved_by": "harish",
+      "diff": "+ password = 'synthetic-placeholder-value'",
+      "radius": 15,
+      "risk": "CRITICAL"
+    },
+    "out": {
+      "blocked": true,
+      "bypass_allowed": false,
+      "gate_score": 0.91,
+      "impact_radius": 15,
+      "reason": "T3: RBAC rejected \u2014 Actor 'harish' not registered in RBAC registry. Only registered actors with role 'senior'/'lead'/'admin' can approve T3.",
+      "requires_approval": true,
+      "risk_level": "CRITICAL",
+      "tier": "T3",
+      "warnings": [
+        "Possible secret exposure: ['generic:password_assign']",
+        "Secret exposure elevates gate tier to T3",
+        "Anti-gaming: cumulative impact_radius 15 exceeds cap 10 in 24h window. T3 required regardless of individual change size."
+      ]
+    }
+  }
+]

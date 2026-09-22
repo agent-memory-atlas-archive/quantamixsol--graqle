@@ -4,8 +4,8 @@ Dependency direction: ``graqle.assurance`` → ``graqle.governance``, never the
 reverse (CR-012 AC-21). With ``GRAQLE_DAG_ENABLED`` unset nothing in this
 package changes SDK behaviour; ``GovernanceMiddleware.check()`` is untouched.
 
-PR-012a exports the flag and settings surface only. ``GateOutcome``, the
-reason-code registry and ``GateVerdict`` arrive in PR-012b; the
+PR-012a exported the flag and settings surface. PR-012b adds ``GateOutcome``,
+the closed reason-code registry and the ``GateVerdict`` schema; the
 ``DecisionAssuranceGate`` component itself arrives in CR-015.
 """
 
@@ -16,6 +16,20 @@ reason-code registry and ``GateVerdict`` arrive in PR-012b; the
 # constraints: never imported by graqle.governance.*
 # ── /graqle:intelligence ──
 
+from graqle.assurance.outcomes import (
+    OUTCOME_SEVERITY,
+    GateOutcome,
+    worst,
+    worst_terminal,
+)
+from graqle.assurance.reason_codes import (
+    REGISTRY,
+    ReasonCode,
+    Severity,
+    max_severity,
+    resolvable,
+    validate,
+)
 from graqle.assurance.settings import (
     ConfigurationError,
     DagSettings,
@@ -26,8 +40,16 @@ from graqle.assurance.settings import (
     reset_dag_settings_cache,
     validate_flag_consistency,
 )
+from graqle.assurance.verdict import (
+    VERDICT_SCHEMA_VERSION,
+    DeterminismRecord,
+    GateVerdict,
+    GateVerdictRef,
+    HardGateResultRef,
+)
 
 __all__ = [
+    # PR-012a — flag + settings
     "ConfigurationError",
     "DagSettings",
     "config_provenance",
@@ -36,4 +58,22 @@ __all__ = [
     "load_dag_settings",
     "reset_dag_settings_cache",
     "validate_flag_consistency",
+    # PR-012b — outcomes
+    "GateOutcome",
+    "OUTCOME_SEVERITY",
+    "worst",
+    "worst_terminal",
+    # PR-012b — reason codes
+    "REGISTRY",
+    "ReasonCode",
+    "Severity",
+    "max_severity",
+    "resolvable",
+    "validate",
+    # PR-012b — verdict
+    "VERDICT_SCHEMA_VERSION",
+    "DeterminismRecord",
+    "GateVerdict",
+    "GateVerdictRef",
+    "HardGateResultRef",
 ]

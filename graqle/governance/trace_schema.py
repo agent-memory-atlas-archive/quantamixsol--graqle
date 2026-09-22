@@ -26,14 +26,25 @@ TS-2 Gate: GovernanceDecision structure is internal IP.
 
 from __future__ import annotations
 
+import logging
 import math
+import os
 import re
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
+
+logger = logging.getLogger("graqle.governance.trace_schema")
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +142,13 @@ LEGACY_POLICY_VERSION_SENTINEL: str = "legacy_pre_v058_unknown"
 # "1" before this CR introduced explicit versioning). Pre-cr-017 records on
 # disk have NO ``schema_version`` field at all and are treated as v1 by
 # :func:`classify_schema_version`.
-CURRENT_SCHEMA_VERSION: str = "2"
+CURRENT_SCHEMA_VERSION: str = "3"
+
+# Every wire version this module can READ. Bumped to include "3" in CR-012
+# PR-012b, which adds the optional ``assurance`` projection (INV-TS-1: the v3
+# field set is a strict superset of v2, so every v2 record validates under the
+# v3 model).
+SUPPORTED_SCHEMA_VERSIONS: frozenset[str] = frozenset({"1", "2", "3"})
 
 
 def classify_schema_version(raw: dict[str, Any] | None) -> str:
@@ -155,6 +172,85 @@ def classify_schema_version(raw: dict[str, Any] | None) -> str:
     return "1"
 
 
+def _pinned_version() -> str:
+    """Reader pin. Unset means the current writer version (CR-012 §5.5)."""
+    return (
+        os.environ.get("GRAQLE_TRACE_SCHEMA_VERSION", CURRENT_SCHEMA_VERSION).strip()
+        or CURRENT_SCHEMA_VERSION
+    )
+
+
+def _strict() -> bool:
+    """``GRAQLE_TRACE_SCHEMA_STRICT`` — positive allowlist, anything else OFF."""
+    return os.environ.get("GRAQLE_TRACE_SCHEMA_STRICT", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def read_trace(raw: dict[str, Any], *, strict: bool | None = None) -> GovernedTrace:
+    """Read a serialized trace of ANY supported schema version.
+
+    This is the ONLY correct way to deserialize a trace record read from disk.
+    Constructing ``GovernedTrace.model_validate(raw)`` directly stamps a legacy
+    record (which carries no ``schema_version`` on disk) with the current
+    default, asserting a schema generation the record predates. That value
+    reaches ``governance_metadata`` inside the frozen ``LEAF_HASH_FIELDS``
+    allowlist, so a relabelled record hashes to a different Merkle leaf than it
+    did when committed. This function preserves the original version instead.
+
+    ``raw`` is never mutated.
+
+    Args:
+        raw: a trace dict parsed from JSONL.
+        strict: override the ``GRAQLE_TRACE_SCHEMA_STRICT`` environment switch.
+
+    Returns:
+        A validated :class:`GovernedTrace` whose ``schema_version`` is the
+        version the record was WRITTEN under, not the current one.
+
+    Raises:
+        ValueError: if the record fails validation, or if its version is
+            unsupported while strict mode is on.
+    """
+    strict = _strict() if strict is None else strict
+    version = classify_schema_version(raw)
+
+    if version not in SUPPORTED_SCHEMA_VERSIONS:
+        if strict:
+            raise ValueError(
+                f"trace schema_version {version!r} unsupported "
+                f"(pinned {_pinned_version()!r}); STRICT is on"
+            )
+        known = set(GovernedTrace.model_fields)
+        dropped = sorted(key for key in raw if key not in known)
+        logger.warning(
+            "trace schema_version %r is newer than pinned %r; best-effort read, "
+            "dropped unknown keys %s",
+            version,
+            _pinned_version(),
+            dropped,
+        )
+        raw = {key: value for key, value in raw.items() if key in known}
+
+    data = dict(raw)
+    if version in ("1", "2"):
+        # Preserve the version the record was written under (v1 records carry
+        # no field at all) and make the additive v3 field explicit.
+        data.setdefault("schema_version", version)
+        data.setdefault("assurance", None)
+
+    try:
+        return GovernedTrace.model_validate(data)
+    except ValidationError as exc:
+        raise ValueError(
+            f"trace {raw.get('id')} failed v{version} validation: "
+            f"{exc.errors(include_url=False)}"
+        ) from exc
+
+
 def get_policy_version_or_sentinel(raw: dict[str, Any] | None) -> str:
     """Read ``policy_version`` from a serialized trace, returning the sentinel
     if absent or ``None``. Used by audit-export, OPSF Use B validation, and
@@ -166,6 +262,31 @@ def get_policy_version_or_sentinel(raw: dict[str, Any] | None) -> str:
     if isinstance(value, str) and value:
         return value
     return LEGACY_POLICY_VERSION_SENTINEL
+
+
+class GateVerdictRef(BaseModel):
+    """Stable projection of a DAG-2026 gate verdict carried on a trace.
+
+    This shape is DUPLICATED from :class:`graqle.assurance.verdict.GateVerdictRef`
+    on purpose: ``graqle.governance`` must never import ``graqle.assurance``
+    (CR-012 AC-21, enforced by the import-linter contract). ``outcome`` is a
+    plain ``str`` here rather than the ``GateOutcome`` enum for the same reason.
+    A parity test keeps the two definitions field-identical (CR-012 OQ-3).
+
+    Carries hashes, codes and counts only -- never a confidence vector, never a
+    weight, never a threshold (TS-1/TS-2).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    verdict_schema_version: str
+    outcome: str
+    reason_codes: list[str]
+    decisive_rule: str | None = None
+    cap_applied: bool = False
+    inputs_hash: str
+    config_version: str
+    evaluation_error_count: int = 0
 
 
 class GovernedTrace(BaseModel):
@@ -220,8 +341,23 @@ class GovernedTrace(BaseModel):
     # ``None``, the reader-side sentinel ``"legacy_pre_v058_unknown"`` is
     # returned by helpers that need a non-null value (see Research-Team
     # v0.58.x directive item #2; OPSF PCT comment 4 alignment).
-    schema_version: str = "2"
+    schema_version: str = "3"
     policy_version: str | None = None
+
+    # -- CR-012 PR-012b: DAG-2026 assurance projection (ADDITIVE) -----------
+    #
+    # ``None`` on every trace until CR-015 writes a verdict, and excluded from
+    # serialisation while it is None (see :meth:`to_internal_dict`) so an
+    # on-disk v3 record with no verdict stays byte-compatible with a v0.83.0
+    # reader under ``extra="forbid"``.
+    #
+    # TS-2: excluded from :meth:`to_public_dict` -- reason codes and hard-gate
+    # results are internal.
+    assurance: GateVerdictRef | None = Field(
+        default=None,
+        repr=False,
+        json_schema_extra={"internal": True},
+    )
 
     # -- Validators --------------------------------------------------------
 
@@ -267,12 +403,33 @@ class GovernedTrace(BaseModel):
     # -- Serialization -----------------------------------------------------
 
     def to_public_dict(self) -> dict[str, Any]:
-        """Serialize excluding TS-2 gated governance_decisions."""
+        """Serialize excluding TS-2 gated fields.
+
+        ``assurance`` joins ``governance_decisions`` in the exclusion set
+        (INV-TS-3): reason codes and hard-gate results are internal.
+        """
         return self.model_dump(
             mode="json",
-            exclude={"governance_decisions"},
+            exclude={"governance_decisions", "assurance"},
         )
 
     def to_internal_dict(self) -> dict[str, Any]:
-        """Full serialization including all governance fields."""
-        return self.model_dump(mode="json")
+        """Full serialization including all governance fields.
+
+        CR-012 PR-012b: ``assurance`` is omitted entirely while it is ``None``
+        (rather than emitted as ``null``) so that a v3 record written before
+        CR-015 ships remains readable by a v0.83.0 reader, whose model is
+        ``extra="forbid"`` and would otherwise reject the unknown key. Once a
+        verdict is attached the key is present and only v3 readers accept it.
+
+        The omission lives here rather than at the call site because this method
+        IS the write path -- ``TraceStore.append`` serialises with it and is its
+        only production caller -- and because every writer must agree on the
+        on-disk shape. ``assurance is None`` and "key absent" are the same state
+        on read: :func:`read_trace` restores it with ``setdefault``, so the
+        round trip is lossless.
+        """
+        data = self.model_dump(mode="json")
+        if self.assurance is None:
+            data.pop("assurance", None)
+        return data

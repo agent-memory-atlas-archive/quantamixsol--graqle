@@ -38,6 +38,7 @@ import pytest
 from pydantic import ValidationError
 
 from graqle.governance.trace_schema import (
+    read_trace,
     ClearanceLevel,
     GovernedTrace,
     Outcome,
@@ -78,10 +79,18 @@ class TestP1LegacyParse:
             "outcome": "SUCCESS",
             "confidence": 0.9,
         }
-        trace = GovernedTrace.model_validate(legacy)
-        # cr-017 defaults populate the new fields.
-        assert trace.schema_version == "2"
+        # CR-012 PR-012b: read_trace() is the ONLY correct deserialization
+        # path for a record read from disk. It PRESERVES the version the record
+        # was written under; bare model_validate() would stamp it with the
+        # current writer default ("3"), asserting a schema generation the
+        # record predates. That value reaches governance_metadata inside the
+        # frozen LEAF_HASH_FIELDS allowlist, so a relabelled record hashes to a
+        # different Merkle leaf than it did when committed.
+        trace = read_trace(legacy)
+        # A pre-cr-017 record carries no schema_version on disk -> classified v1.
+        assert trace.schema_version == "1"
         assert trace.policy_version is None
+        assert trace.assurance is None
         # Pre-cr-017 fields preserve original values.
         assert trace.tool_name == "graq_inspect"
         assert trace.confidence == 0.9
@@ -102,15 +111,16 @@ class TestP1LegacyParse:
             "override_reason": None,
             "error": None,
         }
-        trace = GovernedTrace.model_validate(legacy)
+        trace = read_trace(legacy)
         # All pre-cr-017 fields preserve original values.
         assert trace.tool_name == "graq_review"
         assert trace.context_nodes == ["graqle/core/graph.py"]
         assert trace.clearance_level == ClearanceLevel.CONFIDENTIAL
         assert trace.cost_usd == 0.05
-        # New fields use defaults.
-        assert trace.schema_version == "2"
+        # Version preserved as written (v1: field absent on disk), NOT relabelled.
+        assert trace.schema_version == "1"
         assert trace.policy_version is None
+        assert trace.assurance is None
 
 
 # -------------------------------------------------------------------------

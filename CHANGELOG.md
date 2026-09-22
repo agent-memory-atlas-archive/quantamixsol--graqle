@@ -4,7 +4,15 @@ All notable changes to GraQle are documented in this file.
 
 ---
 
-## Unreleased — 0.84.0 (DAG-2026 CR-012 foundation)
+## Unreleased — 0.84.1 (DAG-2026 CR-012 foundation)
+
+> **CI suppression disclosure (CR-CI-001, issue #350).** CI's green signal for this release is
+> maintained by **37 `--ignore=` flags** in `.github/workflows/ci.yml`: those test files are not
+> executed by CI. **16 test files fail on a local developer machine**, all pre-existing and
+> predating the DAG-2026 programme. This release introduces **zero** regressions — the failure
+> set is identical on this branch and on the unmodified base. Remediation is tracked as
+> **CR-CI-001 (issue #350)**, which **blocks v0.85.0**. One defect that the suppression had
+> hidden — `_FakeServer` doubles broken by PR-012c — is fixed in this release.
 
 > Feature-flagged foundation for the Decision Assurance Gate programme (ADR-RT-004).
 > `GRAQLE_DAG_ENABLED` is **off by default** and, while off, changes no SDK behaviour:
@@ -23,6 +31,35 @@ All notable changes to GraQle are documented in this file.
 - **`.env.example`** at the repo root listing every DAG variable name with placeholders (no tuning values).
 - **`docs/dag/ground-truth-addendum.md`** — the binding correction of the research charter's description
   of 0.83.0 gating, with the SDK team's line-anchor verification notes.
+
+### Added (CR-012 / PR-012b — gate vocabulary)
+
+- **`graqle.assurance.outcomes`** — `GateOutcome`, the five outcomes a gate evaluation can return,
+  with `OUTCOME_SEVERITY` ordering and `worst()` / `worst_terminal()` reducers. `GateOutcome` is
+  private to `graqle.assurance` and is deliberately *not* an extension of
+  `graqle.governance.trace_schema.Decision`: `Decision` records what a governance gate did,
+  `GateOutcome` records what the caller must do next.
+- **`graqle.assurance.reason_codes`** — a validated registry of machine-readable reason codes
+  (`DAG-<class>-<slug>`), `Severity`, `validate()`, `max_severity()` and `resolvable()`.
+  Codes are registered through the registry, never matched ad hoc by a local regex.
+- **`graqle.assurance.verdict`** — `GateVerdict`, `GateVerdictRef`, `HardGateResultRef` and
+  `DeterminismRecord`, at `VERDICT_SCHEMA_VERSION = "1"`.
+- **Trace schema v3** — the trace carries the gate outcome as a plain string via `GateVerdictRef`,
+  preserving the rule that `graqle.governance` never imports `graqle.assurance` (CR-012 AC-21),
+  which is enforced by a contract test in CI.
+
+### Added (CR-012 / PR-012d — fail-visible activation)
+
+- **Typed activation failures** — `VectorIndexMissingError` and `EmbeddingDimensionMismatchError`
+  replace silent degradation when a Neo4j vector index is absent or an embedding width disagrees.
+  Activation now fails visibly instead of quietly returning weaker results.
+- **`graq doctor`** reports Neo4j activation readiness, so the condition is diagnosable before a run.
+
+### Changed (CR-012 / PR-012c — hygiene)
+
+- **`graqle/core/governance_thresholds.py`** centralises governance threshold resolution behind
+  `resolve_governance_config()`, replacing scattered per-call-site defaults.
+- Reliability-diagram and Neo4j connector fixes; MCP dev-server tool registration tidied.
 
 ### Behaviour change when the flag is ON (opt-in only)
 
