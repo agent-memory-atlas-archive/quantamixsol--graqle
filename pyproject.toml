@@ -166,6 +166,7 @@ dev = [
     "mypy>=1.0",
     "ruff>=0.1",
     "import-linter>=2.0",
+    "hypothesis>=6.0",
     "coverage>=7.0",
     "httpx>=0.25",
     "boto3>=1.28",
