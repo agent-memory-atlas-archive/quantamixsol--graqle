@@ -33,7 +33,7 @@ def _ref() -> GateVerdictRef:
     return GateVerdictRef(
         verdict_schema_version="1",
         outcome="REJECT",
-        reason_codes=["DAG-HG01-POLICY_MISSING"],
+        reason_codes=["DAG-HG01-CC"],
         decisive_rule="HG-01",
         cap_applied=True,
         inputs_hash="sha256:" + "a" * 64,
@@ -87,7 +87,7 @@ class TestAC13V3RoundTrip:
         restored = read_trace(trace.to_internal_dict())
         assert restored.assurance is not None
         assert restored.assurance.outcome == "REJECT"
-        assert restored.assurance.reason_codes == ["DAG-HG01-POLICY_MISSING"]
+        assert restored.assurance.reason_codes == ["DAG-HG01-CC"]
         assert restored.schema_version == "3"
 
     def test_public_dict_excludes_internal_fields(self) -> None:

@@ -8,10 +8,12 @@ hard gate failed or the evaluation itself errored. Every model is
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import MappingProxyType
 
 import pytest
 from pydantic import ValidationError
 
+from graqle.assurance import reason_codes
 from graqle.assurance.outcomes import GateOutcome
 from graqle.assurance.verdict import (
     VERDICT_SCHEMA_VERSION,
@@ -136,15 +138,24 @@ class TestGateVerdictSchema:
         with pytest.raises(ValidationError, match="unregistered"):
             _verdict(reason_codes=["DAG-XX-NOPE"])
 
-    def test_registered_reason_codes_are_deduplicated_in_order(self) -> None:
+    def test_registered_reason_codes_are_deduplicated_in_order(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # This version ships an empty seed, so registration is exercised against
+        # a synthetic fixture rather than against seeded codes.
+        fixture = {
+            "DAG-CV-AA": reason_codes.ReasonCode(
+                "DAG-CV-AA", reason_codes.Severity.WARN, "CV", "Advisory.", "0.84.1"
+            ),
+            "DAG-TR-BB": reason_codes.ReasonCode(
+                "DAG-TR-BB", reason_codes.Severity.INFO, "TR", "Informational.", "0.84.1"
+            ),
+        }
+        monkeypatch.setattr(reason_codes, "REGISTRY", MappingProxyType(fixture))
         v = _verdict(
-            reason_codes=[
-                "DAG-CV-DIM_MISSING",
-                "DAG-TR-EARLY_ERROR",
-                "DAG-CV-DIM_MISSING",
-            ]
+            reason_codes=["DAG-CV-AA", "DAG-TR-BB", "DAG-CV-AA"]
         )
-        assert v.reason_codes == ["DAG-CV-DIM_MISSING", "DAG-TR-EARLY_ERROR"]
+        assert v.reason_codes == ["DAG-CV-AA", "DAG-TR-BB"]
 
     def test_confidence_vector_range_is_enforced(self) -> None:
         with pytest.raises(ValidationError, match="out of range"):
@@ -161,7 +172,7 @@ class TestGateVerdictRef:
         ref = GateVerdictRef(
             verdict_schema_version="1",
             outcome="REJECT",
-            reason_codes=["DAG-HG01-POLICY_MISSING"],
+            reason_codes=["DAG-HG01-CC"],
             inputs_hash=_HASH,
             config_version="sha256:c",
         )

@@ -44,7 +44,7 @@ class TestShapeParity:
         payload = {
             "verdict_schema_version": "1",
             "outcome": "REJECT",
-            "reason_codes": ["DAG-HG01-POLICY_MISSING"],
+            "reason_codes": ["DAG-HG01-CC"],
             "decisive_rule": "HG-01",
             "cap_applied": True,
             "inputs_hash": "sha256:" + "a" * 64,
