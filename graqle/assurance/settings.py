@@ -54,7 +54,11 @@ import yaml
 from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from graqle.config.exceptions import GraqleConfigError
+from graqle.config.exceptions import (  # noqa: F401  (re-exported, see below)
+    ENV_FLAG,
+    ConfigurationError,
+    GraqleConfigError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +80,11 @@ __all__ = [
 ]
 
 #: The single feature flag. Positive allowlist; anything else is OFF.
-ENV_FLAG = "GRAQLE_DAG_ENABLED"
+#: CR-012 / PR-012b (ruling N5 + R-C): ``ENV_FLAG`` is DEFINED in
+#: ``graqle.config.exceptions`` and imported above. It is re-exported here so
+#: existing ``from graqle.assurance.settings import ENV_FLAG`` imports keep
+#: working. Do not redefine it: ``config/settings.py`` reads the flag on the
+#: flag-OFF path without importing this module.
 #: Prefix shared by every DAG setting (``GRAQLE_DAG_<FIELD>``).
 ENV_PREFIX = "GRAQLE_DAG_"
 #: Default location of the gitignored private-values file (brief §8.3).
@@ -167,13 +175,10 @@ _TYPE_HINTS: dict[str, str] = {
 _ImpactTier = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 
 
-class ConfigurationError(GraqleConfigError):
-    """Raised on flag mismatch, on missing required DAG config while the flag is
-    on, or on an invalid value. Never a silent placeholder fallback.
-
-    Messages carry setting NAMES only — never the offending value — so a
-    rejected private value cannot leak through logs (Senior chain 4).
-    """
+#: CR-012 / PR-012b (ruling R-C): ``ConfigurationError`` is DEFINED in
+#: ``graqle.config.exceptions`` (inheriting ``GraqleConfigError``) and imported
+#: above, so catching ``GraqleConfigError`` also catches a DAG config failure.
+#: It is re-exported from this module so existing imports keep working.
 
 
 def env_name(field: str) -> str:

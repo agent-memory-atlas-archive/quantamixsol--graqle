@@ -510,7 +510,17 @@ class GovernanceMiddleware:
         learn_callback: Optional[Callable[[dict[str, Any]], None]] = None,
         policy: Optional[Any] = None,  # GovernancePolicyConfig | None
     ) -> None:
-        self.config = config or GovernanceConfig()
+        # CR-012 PR-012c (AC-11): an explicit config still wins. When none is
+        # given, resolve from graqle.yaml instead of silently discarding the
+        # operator's `governance:` block. With no yaml the resolver returns
+        # exactly GovernanceConfig(), so flag-off behaviour is byte-identical
+        # (AC-9 golden, generated on the v0.83.0 tag).
+        if config is not None:
+            self.config = config
+        else:
+            from graqle.core.governance_thresholds import resolve_governance_config
+
+            self.config = resolve_governance_config()
         self._audit_log = audit_log if audit_log is not None else GovernanceAuditLog()
         self._learn_callback = learn_callback
         # Lazy policy load — governance_policy.py is a sibling module (pure stdlib)

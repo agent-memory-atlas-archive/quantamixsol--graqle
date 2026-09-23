@@ -75,9 +75,15 @@ def _triples_with_predicate(g, predicate):
 
 class TestSchemaVersionTriple:
     """The schemaVersion triple must ALWAYS be emitted (the field has a
-    non-None default of "2", so it always has a value)."""
+    non-None default, so it always has a value).
 
-    def test_default_schema_version_emitted_as_2(self):
+    CR-012 PR-012b bumped that default from "2" to "3" (additive `assurance`
+    field). A trace constructed without an explicit version therefore emits
+    "3"; a record READ from disk keeps the version it was written under, which
+    is `read_trace()`'s job and is covered in test_trace_schema_v3_compat.py.
+    """
+
+    def test_default_schema_version_emitted_as_3(self):
         trace = _minimal_trace_with_inspect_step()
         g = _trace_to_rdf(trace)
         triples = _triples_with_predicate(g, _GQ.schemaVersion)
@@ -85,10 +91,12 @@ class TestSchemaVersionTriple:
             f"Expected exactly one schemaVersion triple; got {len(triples)}"
         )
         _, _, obj = triples[0]
-        assert str(obj) == "2"
+        assert str(obj) == "3"
 
     def test_explicit_schema_version_3_emitted(self):
-        # Forward-compat: future schema bumps must emit the actual version.
+        # An EXPLICIT version is emitted verbatim rather than being replaced by
+        # the default. ("3" is the current default as of PR-012b, so this now
+        # overlaps the case above; kept because it pins the explicit path.)
         trace = _minimal_trace_with_inspect_step(schema_version="3")
         g = _trace_to_rdf(trace)
         triples = _triples_with_predicate(g, _GQ.schemaVersion)

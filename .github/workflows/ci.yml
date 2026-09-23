@@ -32,6 +32,13 @@ jobs:
           ruff check --fix graqle/ tests/ || true
           echo "Lint complete (warnings reported, not blocking)"
 
+      # CR-012 PR-012b (AC-21): the DAG dependency-direction contract.
+      # `graqle.assurance` may import `graqle.governance`; never the reverse.
+      # BLOCKING on purpose — a violation here is the failure the duplicated
+      # `GateVerdictRef` shape exists to prevent.
+      - name: Import-linter contracts
+        run: lint-imports
+
       - name: Run tests with coverage
         run: |
           # 26 test files reference classes from stub files emptied in a prior

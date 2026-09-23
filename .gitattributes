@@ -1,0 +1,6 @@
+# CR-012 PR-012c: the AC-9 golden fixture is byte-hash-asserted by
+# tests/test_core/test_governance_threshold_resolver.py. With core.autocrlf=true
+# a Windows checkout rewrites it to CRLF and the recorded sha256 no longer
+# matches, so the test fails on a fresh clone for no behavioural reason.
+# Pin it to LF everywhere.
+tests/fixtures/*.json -text eol=lf
