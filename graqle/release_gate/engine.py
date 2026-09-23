@@ -149,7 +149,11 @@ class ReleaseGateEngine:
         except asyncio.TimeoutError:
             return self._fallback_verdict(effective_target, reason="review_timeout")
         except Exception as exc:  # pylint: disable=broad-except
-            logger.warning("release_gate review provider failed: %s", type(exc).__name__)
+            # Log the full exception (type, message, traceback) to the operator
+            # log. Diagnosing a gate that fails needs the actual error: logging
+            # only the class name is why the 0.84.0 failures were undiagnosable.
+            # The verdict object stays redacted — see _fallback_verdict.
+            logger.exception("release_gate review provider failed: %r", exc)
             return self._fallback_verdict(effective_target, reason="review_error")
 
         review = self._normalize_review(review_raw)
@@ -166,7 +170,8 @@ class ReleaseGateEngine:
         except asyncio.TimeoutError:
             return self._fallback_verdict(effective_target, reason="prediction_timeout")
         except Exception as exc:  # pylint: disable=broad-except
-            logger.warning("release_gate prediction provider failed: %s", type(exc).__name__)
+            # Full exception to the operator log; the verdict stays redacted.
+            logger.exception("release_gate prediction provider failed: %r", exc)
             return self._fallback_verdict(effective_target, reason="prediction_error")
 
         prediction = self._normalize_prediction(prediction_raw)

@@ -135,3 +135,5 @@ Optional compliance surfaces for regulated deployments cover the EU AI Act, SOX/
 ---
 
 *Built by Quantamix Solutions B.V. · Patent pending EP26167849.4 · Local by default · Your code never leaves your machine*
+
+<!-- mcp-name: io.github.quantamixsol/graqle -->
