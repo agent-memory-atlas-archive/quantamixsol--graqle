@@ -228,6 +228,40 @@ def test_gate_handles_review_provider_exception():
     assert "review_error" in result.prediction_reasons
 
 
+def test_provider_exception_text_reaches_the_operator_log(caplog):
+    """The real error must be diagnosable from the log, never from the verdict.
+
+    Regression for the 0.84.0/0.84.1 release-gate failures: the handler logged
+    only ``type(exc).__name__``, so every CI failure read as a bare class name
+    with no message and no traceback, and the cause stayed unknown across
+    multiple releases.
+
+    The two surfaces have opposite requirements and both are asserted here:
+    the operator log carries the full exception, while the verdict object stays
+    redacted because it is user-facing (see the module's IP-redaction contract).
+    """
+    import logging
+
+    eng = _engine(
+        review=FakeReviewProvider(raise_exc=RuntimeError("upstream 503 from review api")),
+    )
+    with caplog.at_level(logging.ERROR, logger="graqle.release_gate.engine"):
+        result = asyncio.run(eng.gate(SAMPLE_DIFF, "pypi"))
+
+    logged = caplog.text
+    assert "upstream 503 from review api" in logged, (
+        "the exception message must reach the operator log — logging only the "
+        "exception class is what made the 0.84.0 failures undiagnosable"
+    )
+    assert "RuntimeError" in logged
+    assert "Traceback" in logged, "logger.exception must attach the traceback"
+
+    # ...and must NOT appear anywhere in the caller-visible verdict.
+    blob = json.dumps(result.to_dict())
+    assert "upstream 503" not in blob
+    assert "RuntimeError" not in blob
+
+
 # ── 16. Prediction provider exception → WARN ─────────────────────────────
 
 def test_gate_handles_prediction_provider_exception():
