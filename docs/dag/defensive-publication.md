@@ -2,7 +2,7 @@
 
 **Type:** Defensive publication (design disclosure)
 **Publisher:** Quantamix Solutions B.V.
-**Authors:** _to be confirmed by the owner before posting_
+**Authors:** Harish Kumar (Quantamix Solutions B.V.)
 **Drafted:** 2026-09-27
 **Public disclosure date:** _the date this document is first posted publicly (GitHub commit timestamp); arXiv identifier added when assigned_
 **Related software:** `graqle` on PyPI, repository `quantamixsol/graqle`
