@@ -4,7 +4,51 @@ All notable changes to GraQle are documented in this file.
 
 ---
 
-## Unreleased — 0.84.1 (DAG-2026 CR-012 foundation)
+## 0.85.0 — 2026-09-27 (CI integrity)
+
+> **CI suppression status (CR-CI-001, issue #350).** The suppression ceiling on this repo
+> drops from **37 to 5** in this release, and a ratcheting guard now enforces it: `MAX` may
+> only move down, and any PR that raises the count fails CI. Roughly **206 previously hidden
+> tests now execute**. The 0.84.1 entry below stated 37 flags; that number is superseded.
+
+### Changed
+
+- **CI suppression ceiling 37 → 5, with a ratcheting guard.** Phase 2 removed 14 stale flags;
+  Phase 3 converted 11 files to named skips (10 patent stubs naming their exact stub module and
+  EP application, plus one naming the Ollama service and model); Phase 4 repaired 7 genuinely
+  failing files. Public and private CI are now at parity.
+- **The release gate fails closed.** `graqle/release_gate/engine.py` previously returned `WARN`
+  at confidence 0.0 when it could not evaluate — a provider timeout or an internal error read as
+  "low confidence, proceed", so a gate that could not assess a release let it through. Both now
+  return `BLOCK`. Bad input blocks too: a gate that cannot parse its own diff, target or
+  `min_confidence` has no basis to pass a release. The never-crash and no-leak contracts are
+  unchanged, and compose verdicts are unaffected — only the fallback changed.
+- **Release-gate failures are diagnosable.** Both provider-exception handlers logged only
+  `type(exc).__name__`, so every failure surfaced as a bare class name with no message and no
+  traceback. They now log the full exception. The verdict object stays redacted: the operator
+  log and the user-facing verdict have opposite requirements, and a test asserts both.
+
+### Fixed
+
+- `hypothesis` was imported by several test modules but never declared in the dev extras. The
+  gap stayed invisible because every affected module sat behind an `--ignore` flag.
+- `CliRunner.isolated_filesystem` was removed in newer click; `typer[all]>=0.9` is unpinned, so
+  CI resolved a version where it does not exist while local installs still had it. Those tests
+  now use pytest's `tmp_path`, which does not depend on the runner's API surface.
+- A Hypothesis `too_slow` health check on input generation began failing once ~460 previously
+  hidden tests started collecting. Suppressed, matching the sibling property tests.
+
+### Notes
+
+- **No new DAG-2026 disclosure in this release.** The Decision Assurance Gate foundation shipped
+  in 0.84.1; the reason-code registry still ships with an empty seed and `GRAQLE_DAG_ENABLED`
+  remains `false` by default.
+- Two defects that the suppression flags were concealing are tracked separately rather than
+  fixed here, because each needs a decision rather than a patch.
+
+---
+
+## 0.84.1 — 2026-09-23 (DAG-2026 CR-012 foundation)
 
 > **CI suppression disclosure (CR-CI-001, issue #350).** CI's green signal for this release is
 > maintained by **37 `--ignore=` flags** in `.github/workflows/ci.yml`: those test files are not
