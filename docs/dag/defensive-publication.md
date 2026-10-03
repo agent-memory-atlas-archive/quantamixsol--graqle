@@ -1,6 +1,6 @@
 # Ordered Independent Hard Gates with Non-Compensatory Evaluation and a Critical-Failure Cap for Governing Autonomous Agent Actions
 
-**Type:** Defensive publication (design disclosure)
+**Type:** Design disclosure
 **Publisher:** Quantamix Solutions B.V.
 **Authors:** Harish Kumar (Quantamix Solutions B.V.)
 **Drafted:** 2026-09-27
