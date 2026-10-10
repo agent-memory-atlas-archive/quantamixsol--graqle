@@ -4,6 +4,22 @@ All notable changes to GraQle are documented in this file.
 
 ---
 
+## 0.85.1 — 2026-10-10 (Community edition message)
+
+### Fixed
+
+- **Community users are no longer told to install a package that does not exist.** Running a
+  hosted-service command such as `graq serve` on the free edition printed
+  `pip install graqle-studio`, but that distribution is not on PyPI, so the only suggested step
+  was a dead end. The message now says the command is part of the hosted GraQle service and is
+  not included in the free Community edition, and points to https://graqle.com/pricing
+  (Enterprise: sales@graqle.com). The free edition's capabilities are unchanged.
+
+> This patch contains only the edition-guard change (the guard hunk of CR-LIC-0851). The other
+> CR-LIC-0851 changes (webhook, billing, register) ship in a later release after review.
+
+---
+
 ## 0.85.0 — 2026-09-27 (CI integrity)
 
 > **CI suppression status (CR-CI-001, issue #350).** The suppression ceiling on this repo
