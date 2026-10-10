@@ -805,6 +805,7 @@ def inspect(
 
 
 @app.command()
+@requires_package("graq serve")
 def serve(
     config: str = typer.Option("graqle.yaml", "--config", "-c"),
     host: str = typer.Option("0.0.0.0", "--host", "-h", help="Bind host"),
@@ -837,6 +838,16 @@ def serve(
             "  This installs: uvicorn, fastapi, httptools, uvloop (unix)\n"
         )
         raise typer.Exit(1)
+
+    # The API server is a proprietary backend, excluded from the Community wheel.
+    # Resolve it up front so a missing backend reaches the edition guard with a clean
+    # message, even under --reload/--workers where uvicorn imports it in a subprocess.
+    import importlib.util
+
+    if importlib.util.find_spec("graqle.server.app") is None:
+        raise ModuleNotFoundError(
+            "No module named 'graqle.server.app'", name="graqle.server.app"
+        )
 
     # Forward config path and CWD to uvicorn factory subprocess via env vars
     import pathlib
@@ -938,7 +949,7 @@ def studio(
         from graqle.cli._edition_guard import _is_proprietary_absence, _degrade_message
 
         if _is_proprietary_absence(exc) is not None:
-            console.print(_degrade_message(exc.name or "graqle.studio", "graq serve"))
+            console.print(_degrade_message(exc.name or "graqle.studio", "graq studio"))
             raise typer.Exit(code=2) from None
         raise
 
