@@ -82,13 +82,14 @@ def test_is_proprietary_absence_none_name():
 # ---- _degrade_message ---------------------------------------------------------
 
 
-def test_degrade_message_has_install_path_no_dead_url():
+def test_degrade_message_has_no_dead_end():
     msg = _degrade_message("graqle.cloud.credentials", "graq cloud status")
-    assert "pip install graqle-studio" in msg
     assert "graq cloud status" in msg
-    # AUD-029: must NOT hardcode the not-yet-existent editions URL
+    # CR-LIC-0851: graqle-studio is not on PyPI — never tell users to install it.
+    assert "pip install" not in msg
+    # AUD-029: only live pages; /editions does not exist.
     assert "graqle.com/editions" not in msg
-    assert "http" not in msg
+    assert "https://graqle.com/pricing" in msg
 
 
 # ---- requires_package decorator ----------------------------------------------

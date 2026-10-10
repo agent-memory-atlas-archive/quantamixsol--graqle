@@ -72,18 +72,22 @@ def _is_proprietary_absence(exc: ModuleNotFoundError) -> str | None:
     return None
 
 
+#: Live page that explains the editions (verified 200 on 2026-09-27).
+PLANS_URL = "https://graqle.com/pricing"
+
+
 def _degrade_message(missing_module: str, command_label: str) -> str:
-    """Build the clean, actionable degrade message (no dead URLs — AUD-029)."""
-    dist = _distribution_for(missing_module)
-    # TODO(WS-H): append the editions overview URL (e.g. https://graqle.com/editions)
-    # once the site page ships. Until then, give only the actionable install path —
-    # never a dead link (honesty / journey-trace rule).
+    """Build the clean, actionable degrade message (no dead ends — AUD-029).
+
+    CR-LIC-0851: this used to tell users to install a ``graqle-studio``
+    distribution. That package is not on PyPI, so the only "actionable" step
+    was a dead end. The commercial
+    backends are hosted, not installed; point at the live plans page instead.
+    """
     return (
-        f"[bold yellow]'{command_label}' requires a GraQle commercial edition.[/bold yellow]\n\n"
-        f"This is part of GraQle Studio/Enterprise and is not included in the free "
-        f"Community edition.\n\n"
-        f"To enable it, install the commercial package:\n"
-        f"    [cyan]pip install {dist}[/cyan]\n\n"
+        f"[bold yellow]'{command_label}' is part of the hosted GraQle service "
+        f"and is not included in the free Community edition.[/bold yellow]\n\n"
+        f"See plans: [cyan]{PLANS_URL}[/cyan]  ·  Enterprise: sales@graqle.com\n\n"
         f"The free Community edition includes reasoning, governance, tamper-evidence, "
         f"the offline verifier, and local anchoring — all unchanged."
     )
