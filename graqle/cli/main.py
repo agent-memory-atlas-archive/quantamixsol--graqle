@@ -270,8 +270,15 @@ def mcp_serve(
     read_only: bool = typer.Option(
         False, "--read-only", help="Read-only mode: blocks mutation tools (graq_learn, graq_reload)"
     ),
+    transport: str = typer.Option(
+        "stdio", "--transport", help="Transport: stdio (default) or http (shared server, CR-INFRA-02)"
+    ),
+    host: str = typer.Option(
+        "127.0.0.1", "--host", help="HTTP bind host (non-loopback requires GRAQLE_MCP_HTTP_TOKEN)"
+    ),
+    port: int = typer.Option(8765, "--port", help="HTTP bind port"),
 ) -> None:
-    """Start the GraQle MCP development server (stdio transport).
+    """Start the GraQle MCP development server (stdio transport by default).
 
     Exposes development intelligence tools over JSON-RPC stdio:
       graq_context, graq_inspect, graq_reason, graq_preflight,
@@ -292,6 +299,26 @@ def mcp_serve(
 
     from graqle.__version__ import __version__
     from graqle.plugins.mcp_dev_server import KogniDevServer
+
+    if transport not in ("stdio", "http"):
+        console.print(f"[red]Unknown --transport {transport!r}; use stdio or http.[/red]")
+        raise typer.Exit(2)
+    if transport == "http":
+        # Validate bind/auth BEFORE loading the graph; refuse unsafe config (fail closed).
+        from graqle.plugins.mcp_http_transport import (
+            HttpTransportConfigError,
+            resolve_auth_token,
+            run_http,
+        )
+
+        try:
+            resolve_auth_token(host)
+        except HttpTransportConfigError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(2)
+        os.environ.setdefault("GRAQLE_SERVE_CWD", str(Path.cwd()))
+        run_http(KogniDevServer(config_path=config, read_only=read_only), host=host, port=port)
+        return
 
     # Anchor CWD so _graph_file resolves against project root, not IDE spawn dir.
     # serve() already does this via GRAQLE_SERVE_CWD — mcp_serve must match.
