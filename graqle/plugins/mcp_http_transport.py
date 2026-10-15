@@ -11,9 +11,9 @@ Security defaults (fail closed):
   * when a token is configured every request must carry it as a Bearer token;
   * a request with a non-loopback ``Origin`` to a loopback bind is rejected.
 
-NOTE (PR-a scope): per-session gate state (CG-01/CG-02, todos, cost) is still
-held by the single ``KogniDevServer`` and is therefore shared by all HTTP
-sessions. Isolating it per session is CR-INFRA-02 PR-b.
+Per-session gate state (CG-01/CG-02, todos, session cache, cost) lives in a
+``SessionState`` per ``Mcp-Session-Id`` (CR-INFRA-02 PR-b, see
+``mcp_session_state``); each request is dispatched with that state bound.
 """
 
 from __future__ import annotations
@@ -25,6 +25,8 @@ import os
 import secrets
 from typing import Any
 from urllib.parse import urlparse
+
+from graqle.plugins.mcp_session_state import SessionState, bind_session
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_TOKEN_ENV = "GRAQLE_MCP_HTTP_TOKEN"
@@ -71,7 +73,7 @@ def create_app(server: Any, host: str = DEFAULT_HOST, token: str | None = None) 
     from starlette.responses import JSONResponse, Response
     from starlette.routing import Route
 
-    sessions: set[str] = set()
+    sessions: dict[str, SessionState] = {}
     loopback_bind = is_loopback_host(host)
 
     def _check(request: Request) -> Response | None:
@@ -106,7 +108,7 @@ def create_app(server: Any, host: str = DEFAULT_HOST, token: str | None = None) 
         headers: dict[str, str] = {}
         if message.get("method") == "initialize":
             session_id = secrets.token_hex(16)
-            sessions.add(session_id)
+            sessions[session_id] = SessionState()
             headers[SESSION_HEADER] = session_id
         else:
             session_id = request.headers.get(SESSION_HEADER, "")
@@ -116,7 +118,8 @@ def create_app(server: Any, host: str = DEFAULT_HOST, token: str | None = None) 
                 return JSONResponse(_rpc_error(-32600, "unknown session"), status_code=404)
 
         try:
-            response = await server._handle_jsonrpc(message)
+            with bind_session(sessions[session_id]):
+                response = await server._handle_jsonrpc(message)
         except Exception as exc:  # fail closed: report, never pass through
             return JSONResponse(
                 _rpc_error(-32603, f"Internal error: {type(exc).__name__}"),
@@ -134,7 +137,7 @@ def create_app(server: Any, host: str = DEFAULT_HOST, token: str | None = None) 
         session_id = request.headers.get(SESSION_HEADER, "")
         if session_id not in sessions:
             return JSONResponse(_rpc_error(-32600, "unknown session"), status_code=404)
-        sessions.discard(session_id)
+        sessions.pop(session_id, None)
         return Response(status_code=200)
 
     return Starlette(

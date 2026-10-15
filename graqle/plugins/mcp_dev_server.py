@@ -53,6 +53,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from graqle.plugins.mcp_session_state import PerSessionStateMixin
+
 logger = logging.getLogger("graqle.mcp")
 
 
@@ -3369,7 +3371,7 @@ def _update_memory_index(memory_dir, filename, name, description, mem_type):
     return True
 
 
-class KogniDevServer:
+class KogniDevServer(PerSessionStateMixin):
     """MCP server exposing 7 governed development tools over stdio.
 
     Implements the Model Context Protocol JSON-RPC transport.
@@ -6957,6 +6959,16 @@ class KogniDevServer:
     # ── 8. graq_learn (PRO) ──────────────────────────────────────────
 
     async def _handle_learn(self, args: dict[str, Any]) -> str:
+        # CR-INFRA-02 PR-b (AC3): the graph is shared read state across HTTP
+        # sessions; every learn write goes through one lock so concurrent
+        # sessions cannot lose each other's update. Uncontended on stdio.
+        lock = self.__dict__.get("_learn_write_lock")
+        if lock is None:
+            lock = self.__dict__.setdefault("_learn_write_lock", asyncio.Lock())
+        async with lock:
+            return await self._handle_learn_locked(args)
+
+    async def _handle_learn_locked(self, args: dict[str, Any]) -> str:
         mode = args.get("mode", "outcome")
 
         # v0.51.3 — structured JSON action routing (VS Code extension
