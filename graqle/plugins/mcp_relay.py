@@ -26,6 +26,7 @@ from urllib.parse import urlparse
 
 DEFAULT_TOKEN_ENV = "GRAQLE_MCP_HTTP_TOKEN"
 SESSION_HEADER = "Mcp-Session-Id"
+PROJECT_HEADER = "X-Graqle-Project"
 ERR_UNREACHABLE = -32003
 ERR_BAD_REPLY = -32004
 TIMEOUT_S = 120
@@ -67,8 +68,9 @@ def _error_reply(message: dict[str, Any], code: int, text: str) -> dict[str, Any
 class Relay:
     """Forwards JSON-RPC messages to one shared server, tracking its session id."""
 
-    def __init__(self, url: str, token: str | None = None) -> None:
+    def __init__(self, url: str, token: str | None = None, project: str | None = None) -> None:
         self.url = normalise_url(url)
+        self._project = project
         parsed = urlparse(self.url)
         if token is not None and parsed.scheme != "https" and not _is_loopback(parsed.hostname or ""):
             raise RelayConfigError("refusing to send the auth token over plain http to a non-loopback host")
@@ -80,6 +82,8 @@ class Relay:
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self._token is not None:
             headers["Authorization"] = f"Bearer {self._token}"
+        if self._project is not None:
+            headers[PROJECT_HEADER] = self._project
         if self._session_id is not None:
             headers[SESSION_HEADER] = self._session_id
         req = urllib.request.Request(
@@ -124,11 +128,12 @@ def run_relay(
     token_env: str = DEFAULT_TOKEN_ENV,
     stdin: TextIO | None = None,
     stdout: TextIO | None = None,
+    project: str | None = None,
 ) -> None:
     """Relay newline-delimited JSON-RPC from stdin to the server until EOF."""
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
-    relay = Relay(url, os.environ.get(token_env, "").strip() or None)
+    relay = Relay(url, os.environ.get(token_env, "").strip() or None, project)
     for line in stdin:
         line = line.strip()
         if not line:

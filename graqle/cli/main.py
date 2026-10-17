@@ -277,6 +277,9 @@ def mcp_serve(
         "127.0.0.1", "--host", help="HTTP bind host (non-loopback requires GRAQLE_MCP_HTTP_TOKEN)"
     ),
     port: int = typer.Option(8765, "--port", help="HTTP bind port"),
+    projects: str = typer.Option(
+        None, "--projects", help="projects.yaml: serve several separate project graphs (http only)"
+    ),
 ) -> None:
     """Start the GraQle MCP development server (stdio transport by default).
 
@@ -303,6 +306,9 @@ def mcp_serve(
     if transport not in ("stdio", "http"):
         console.print(f"[red]Unknown --transport {transport!r}; use stdio or http.[/red]")
         raise typer.Exit(2)
+    if projects is not None and transport != "http":
+        console.print("[red]--projects requires --transport http.[/red]")
+        raise typer.Exit(2)
     if transport == "http":
         # Validate bind/auth BEFORE loading the graph; refuse unsafe config (fail closed).
         from graqle.plugins.mcp_http_transport import (
@@ -316,6 +322,23 @@ def mcp_serve(
         except HttpTransportConfigError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(2)
+        if projects is not None:
+            from graqle.plugins.mcp_project_hub import (
+                HubConfigError,
+                ProjectHub,
+                load_projects_file,
+            )
+
+            try:
+                hub = ProjectHub(
+                    load_projects_file(projects),
+                    lambda spec: KogniDevServer(config_path=spec.config, read_only=read_only),
+                )
+            except HubConfigError as exc:
+                console.print(f"[red]{exc}[/red]")
+                raise typer.Exit(2)
+            run_http(host=host, port=port, hub=hub)
+            return
         os.environ.setdefault("GRAQLE_SERVE_CWD", str(Path.cwd()))
         run_http(KogniDevServer(config_path=config, read_only=read_only), host=host, port=port)
         return
@@ -374,6 +397,9 @@ def mcp_relay(
     url: str = typer.Option(
         ..., "--url", help="Shared GraQle MCP HTTP server, e.g. http://127.0.0.1:8765 (CR-INFRA-02)"
     ),
+    project: str = typer.Option(
+        None, "--project", help="Project name on a multi-project hub (graq mcp serve --projects)"
+    ),
 ) -> None:
     """Thin stdio MCP relay to a shared server (no graph is loaded here).
 
@@ -383,7 +409,7 @@ def mcp_relay(
     from graqle.plugins.mcp_relay import RelayConfigError, run_relay
 
     try:
-        run_relay(url)
+        run_relay(url, project=project)
     except RelayConfigError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(2)

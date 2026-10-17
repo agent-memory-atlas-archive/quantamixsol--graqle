@@ -32,6 +32,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_TOKEN_ENV = "GRAQLE_MCP_HTTP_TOKEN"
 SESSION_HEADER = "mcp-session-id"
 MCP_PATH = "/mcp"
+PROJECT_HEADER = "x-graqle-project"  # hub mode: binds a session to one project
 
 
 class HttpTransportConfigError(RuntimeError):
@@ -66,14 +67,34 @@ def _rpc_error(code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": None, "error": {"code": code, "message": message}}
 
 
-def create_app(server: Any, host: str = DEFAULT_HOST, token: str | None = None) -> Any:
-    """Build the Starlette app serving *server* (a ``KogniDevServer``)."""
+def _names_other_project(message: dict[str, Any], bound: str) -> bool:
+    """True if a tools/call explicitly names a project other than the bound one."""
+    params = message.get("params")
+    arguments = params.get("arguments") if isinstance(params, dict) else None
+    if not isinstance(arguments, dict):
+        return False
+    return any(
+        key in arguments and arguments[key] != bound for key in ("project", "project_name")
+    )
+
+
+def create_app(
+    server: Any = None, host: str = DEFAULT_HOST, token: str | None = None, hub: Any = None
+) -> Any:
+    """Build the Starlette app serving *server* (a ``KogniDevServer``).
+
+    With *hub* (a ``ProjectHub``, CR-INFRA-02 PR-d) the app serves several
+    projects instead: each session is bound to one project at ``initialize``.
+    """
+    if (server is None) == (hub is None):
+        raise HttpTransportConfigError("pass exactly one of server or hub")
     from starlette.applications import Starlette
     from starlette.requests import Request
     from starlette.responses import JSONResponse, Response
     from starlette.routing import Route
 
     sessions: dict[str, SessionState] = {}
+    session_projects: dict[str, str] = {}  # hub mode: session id -> bound project
     loopback_bind = is_loopback_host(host)
 
     def _check(request: Request) -> Response | None:
@@ -106,9 +127,20 @@ def create_app(server: Any, host: str = DEFAULT_HOST, token: str | None = None) 
             )
 
         headers: dict[str, str] = {}
+        requested_project = request.headers.get(PROJECT_HEADER, "")
+        if hub is not None and message.get("method") == "initialize":
+            if not requested_project:
+                return JSONResponse(
+                    _rpc_error(-32600, f"missing project: send the {PROJECT_HEADER} header"),
+                    status_code=400,
+                )
+            if not hub.has(requested_project):
+                return JSONResponse(_rpc_error(-32600, "unknown project"), status_code=404)
         if message.get("method") == "initialize":
             session_id = secrets.token_hex(16)
             sessions[session_id] = SessionState()
+            if hub is not None:
+                session_projects[session_id] = requested_project
             headers[SESSION_HEADER] = session_id
         else:
             session_id = request.headers.get(SESSION_HEADER, "")
@@ -117,9 +149,20 @@ def create_app(server: Any, host: str = DEFAULT_HOST, token: str | None = None) 
             if session_id not in sessions:
                 return JSONResponse(_rpc_error(-32600, "unknown session"), status_code=404)
 
+        bound = session_projects.get(session_id)
+        if hub is not None:
+            # Isolation: a session may only ever address the project it was bound to.
+            if bound is None or (requested_project and requested_project != bound):
+                return JSONResponse(_rpc_error(-32002, "project mismatch"), status_code=403)
+            if _names_other_project(message, bound):
+                return JSONResponse(_rpc_error(-32002, "request names another project"), status_code=403)
+
         try:
             with bind_session(sessions[session_id]):
-                response = await server._handle_jsonrpc(message)
+                if hub is not None:
+                    response = await hub.dispatch(bound, message)
+                else:
+                    response = await server._handle_jsonrpc(message)
         except Exception as exc:  # fail closed: report, never pass through
             return JSONResponse(
                 _rpc_error(-32603, f"Internal error: {type(exc).__name__}"),
@@ -138,6 +181,7 @@ def create_app(server: Any, host: str = DEFAULT_HOST, token: str | None = None) 
         if session_id not in sessions:
             return JSONResponse(_rpc_error(-32600, "unknown session"), status_code=404)
         sessions.pop(session_id, None)
+        session_projects.pop(session_id, None)
         return Response(status_code=200)
 
     return Starlette(
@@ -146,11 +190,15 @@ def create_app(server: Any, host: str = DEFAULT_HOST, token: str | None = None) 
 
 
 def run_http(
-    server: Any, host: str = DEFAULT_HOST, port: int = 8765, token_env: str = DEFAULT_TOKEN_ENV
+    server: Any = None,
+    host: str = DEFAULT_HOST,
+    port: int = 8765,
+    token_env: str = DEFAULT_TOKEN_ENV,
+    hub: Any = None,
 ) -> None:
     """Validate the bind/auth configuration, then serve until interrupted."""
     import uvicorn
 
     token = resolve_auth_token(host, token_env)  # raises before anything binds
-    app = create_app(server, host=host, token=token)
+    app = create_app(server, host=host, token=token, hub=hub)
     uvicorn.run(app, host=host, port=port, log_level="info")
