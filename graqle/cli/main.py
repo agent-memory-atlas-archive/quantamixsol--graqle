@@ -369,6 +369,28 @@ def mcp_serve(
         raise SystemExit(1)
 
 
+@mcp_app.command("relay")
+def mcp_relay(
+    url: str = typer.Option(
+        ..., "--url", help="Shared GraQle MCP HTTP server, e.g. http://127.0.0.1:8765 (CR-INFRA-02)"
+    ),
+) -> None:
+    """Thin stdio MCP relay to a shared server (no graph is loaded here).
+
+    Replace the command in .mcp.json:
+        { "mcpServers": { "graq": { "command": "graq", "args": ["mcp", "relay", "--url", "http://127.0.0.1:8765"] } } }
+    """
+    from graqle.plugins.mcp_relay import RelayConfigError, run_relay
+
+    try:
+        run_relay(url)
+    except RelayConfigError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2)
+    except KeyboardInterrupt:
+        pass
+
+
 @mcp_app.command("restart")
 def mcp_restart() -> None:
     """Restart the MCP server (kills running instance, starts new one).
