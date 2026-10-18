@@ -48,10 +48,38 @@ def test_http_loopback_dispatches_to_run_http(monkeypatch, tmp_path):
     monkeypatch.delenv(ht.DEFAULT_TOKEN_ENV, raising=False)
     monkeypatch.setattr(dev, "KogniDevServer", _StubServer)
     seen = {}
-    monkeypatch.setattr(ht, "run_http", lambda server, host, port: seen.update(host=host, port=port))
-    result = runner.invoke(app, ["mcp", "serve", "--transport", "http", "--port", "9123"])
+    monkeypatch.setattr(
+        ht, "run_http",
+        lambda server, host, port, allowed_roots: seen.update(host=host, port=port, roots=allowed_roots),
+    )
+    result = runner.invoke(
+        app, ["mcp", "serve", "--transport", "http", "--port", "9123", "--allowed-roots", str(tmp_path)]
+    )
     assert result.exit_code == 0, result.output
-    assert seen == {"host": "127.0.0.1", "port": 9123}
+    assert seen == {"host": "127.0.0.1", "port": 9123, "roots": [tmp_path.resolve()]}
+
+
+def test_http_without_allowed_roots_refuses(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(ht.DEFAULT_TOKEN_ENV, raising=False)
+    monkeypatch.setattr(dev, "KogniDevServer", _StubServer)
+    result = runner.invoke(app, ["mcp", "serve", "--transport", "http"])
+    assert result.exit_code == 2
+
+
+def test_http_invalid_allowed_root_refuses_to_start(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(ht.DEFAULT_TOKEN_ENV, raising=False)
+
+    def _boom(*a, **k):
+        raise AssertionError("server started with an invalid allow-list")
+
+    monkeypatch.setattr(dev, "KogniDevServer", _boom)
+    monkeypatch.setattr(ht, "run_http", _boom)
+    result = runner.invoke(
+        app, ["mcp", "serve", "--transport", "http", "--allowed-roots", str(tmp_path / "missing")]
+    )
+    assert result.exit_code == 2
 
 
 def test_unknown_transport_rejected(monkeypatch, tmp_path):

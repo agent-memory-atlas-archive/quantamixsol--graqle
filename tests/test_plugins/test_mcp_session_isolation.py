@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from starlette.testclient import TestClient
 
 from graqle.plugins import mcp_http_transport as t
+from tests.test_plugins.ws_helpers import ws_client
 from graqle.plugins.mcp_dev_server import KogniDevServer
 from graqle.plugins.mcp_session_state import SessionState, bind_session
 
@@ -36,7 +37,7 @@ def _call(client: TestClient, headers: dict[str, str], name: str, args: dict) ->
 
 
 def test_session_start_and_plan_do_not_unlock_other_session():
-    client = TestClient(t.create_app(_server()))
+    client = ws_client(_server())
     a, b = _open(client), _open(client)
 
     assert _call(client, a, "graq_bash", {"command": "true"})["error"] == "CG-01_SESSION_GATE"
@@ -52,7 +53,7 @@ def test_session_start_and_plan_do_not_unlock_other_session():
 
 
 def test_new_session_starts_with_closed_gates_even_after_another_unlocked():
-    client = TestClient(t.create_app(_server()))
+    client = ws_client(_server())
     a = _open(client)
     _call(client, a, "graq_lifecycle", {"event": "session_start"})
     _call(client, a, "graq_plan", {"goal": "x", "dry_run": True})
@@ -85,7 +86,7 @@ def test_unbound_state_is_instance_default_and_unaffected_by_sessions():
 
 
 def test_delete_drops_session_state():
-    client = TestClient(t.create_app(_server()))
+    client = ws_client(_server())
     a = _open(client)
     assert client.delete("/mcp", headers=a).status_code == 200
     r = client.post("/mcp", headers=a, json={"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
@@ -117,7 +118,7 @@ def test_concurrent_sessions_read_correct_results():
     graph = MagicMock()
     graph.nodes = {"n1": node}
 
-    client = TestClient(t.create_app(server))
+    client = ws_client(server)
     a, b = _open(client), _open(client)
     _unlock(client, a)  # B stays locked
     out_b_locked = _call(client, b, "graq_bash", {"command": "true"})

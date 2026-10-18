@@ -21,10 +21,12 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any, TextIO
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 DEFAULT_TOKEN_ENV = "GRAQLE_MCP_HTTP_TOKEN"
+WORKSPACE_HEADER = "X-Graqle-Workspace-Root"
 SESSION_HEADER = "Mcp-Session-Id"
 PROJECT_HEADER = "X-Graqle-Project"
 ERR_UNREACHABLE = -32003
@@ -68,9 +70,21 @@ def _error_reply(message: dict[str, Any], code: int, text: str) -> dict[str, Any
 class Relay:
     """Forwards JSON-RPC messages to one shared server, tracking its session id."""
 
-    def __init__(self, url: str, token: str | None = None, project: str | None = None) -> None:
+    def __init__(
+        self,
+        url: str,
+        token: str | None = None,
+        project: str | None = None,
+        workspace_root: str | None = None,
+    ) -> None:
         self.url = normalise_url(url)
         self._project = project
+        # CR-INFRA-02e: the server binds this root once at initialize (header,
+        # percent-encoded); default is the relay's own cwd.
+        root = Path(workspace_root or os.getcwd()).resolve()
+        if not root.is_dir():
+            raise RelayConfigError(f"--workspace-root is not a directory: {root}")
+        self._workspace_root = quote(str(root), safe="/:")
         parsed = urlparse(self.url)
         if token is not None and parsed.scheme != "https" and not _is_loopback(parsed.hostname or ""):
             raise RelayConfigError("refusing to send the auth token over plain http to a non-loopback host")
@@ -84,6 +98,7 @@ class Relay:
             headers["Authorization"] = f"Bearer {self._token}"
         if self._project is not None:
             headers[PROJECT_HEADER] = self._project
+        headers[WORKSPACE_HEADER] = self._workspace_root
         if self._session_id is not None:
             headers[SESSION_HEADER] = self._session_id
         req = urllib.request.Request(
@@ -129,11 +144,12 @@ def run_relay(
     stdin: TextIO | None = None,
     stdout: TextIO | None = None,
     project: str | None = None,
+    workspace_root: str | None = None,
 ) -> None:
     """Relay newline-delimited JSON-RPC from stdin to the server until EOF."""
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
-    relay = Relay(url, os.environ.get(token_env, "").strip() or None, project)
+    relay = Relay(url, os.environ.get(token_env, "").strip() or None, project, workspace_root)
     for line in stdin:
         line = line.strip()
         if not line:

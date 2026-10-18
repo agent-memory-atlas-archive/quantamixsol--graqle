@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 import json
 import os
 import pathlib
@@ -39,7 +40,7 @@ def live_server():
     from graqle.plugins.mcp_http_transport import create_app
 
     port = _free_port()
-    config = uvicorn.Config(create_app(_FakeServer()), host="127.0.0.1", port=port, log_level="error")
+    config = uvicorn.Config(create_app(_FakeServer(), allowed_roots=[Path('/')]), host="127.0.0.1", port=port, log_level="error")
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()

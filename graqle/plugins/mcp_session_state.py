@@ -18,6 +18,7 @@ import contextvars
 from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Iterator
 
 
@@ -35,11 +36,45 @@ class SessionState:
     cg03_bypass: bool = False
     todos: list[dict[str, Any]] = field(default_factory=list)
     session_cache: OrderedDict = field(default_factory=OrderedDict)
+    # CR-INFRA-02e: set once at ``initialize`` by the HTTP transport, never changed.
+    workspace_root: Path | None = None
+    http_mode: bool = False
 
 
 _current: contextvars.ContextVar[SessionState | None] = contextvars.ContextVar(
     "graqle_mcp_session_state", default=None
 )
+
+# True once ``run_http`` serves a workspace-rooted server: from then on a lost
+# session binding is an error, never a fallback to the server's cwd.
+_http_serving = False
+
+
+class WorkspaceNotBound(RuntimeError):
+    """HTTP mode: the current call has no bound session workspace root."""
+
+
+def set_http_serving(value: bool) -> None:
+    global _http_serving
+    _http_serving = value
+
+
+def session_workspace_root() -> Path | None:
+    """The bound workspace root in HTTP mode; ``None`` in stdio mode.
+
+    Fails closed: in HTTP mode an unbound call (for example work spawned on a
+    thread that did not copy the context) raises ``WorkspaceNotBound``.
+    """
+    state = _current.get()
+    if state is None:
+        if _http_serving:
+            raise WorkspaceNotBound("workspace root not bound")
+        return None
+    if not state.http_mode:
+        return None
+    if state.workspace_root is None:
+        raise WorkspaceNotBound("workspace root not bound")
+    return state.workspace_root
 
 
 @contextmanager

@@ -6,6 +6,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from graqle.plugins import mcp_http_transport as t
+from tests.test_plugins.ws_helpers import ws_client
 
 
 class _FakeServer:
@@ -57,7 +58,7 @@ def test_non_loopback_with_token_ok_and_loopback_needs_none(monkeypatch):
 
 def test_request_without_or_with_wrong_token_rejected():
     server = _FakeServer()
-    client = TestClient(t.create_app(server, host="0.0.0.0", token="s3cret"))
+    client = ws_client(server, host="0.0.0.0", token="s3cret")
     assert _init(client).status_code == 401
     assert _init(client, headers={"Authorization": "Bearer wrong"}).status_code == 401
     assert _init(client, headers={"Authorization": "Basic s3cret"}).status_code == 401
@@ -67,7 +68,7 @@ def test_request_without_or_with_wrong_token_rejected():
 
 def test_session_lifecycle_and_two_concurrent_sessions():
     server = _FakeServer()
-    client = TestClient(t.create_app(server))
+    client = ws_client(server)
     a = _init(client).headers[t.SESSION_HEADER]
     b = _init(client).headers[t.SESSION_HEADER]
     assert a != b
@@ -83,7 +84,7 @@ def test_session_lifecycle_and_two_concurrent_sessions():
 
 def test_missing_or_unknown_session_rejected_and_not_dispatched():
     server = _FakeServer()
-    client = TestClient(t.create_app(server))
+    client = ws_client(server)
     body = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
     assert client.post("/mcp", json=body).status_code == 400
     assert client.post("/mcp", json=body, headers={t.SESSION_HEADER: "nope"}).status_code == 404
@@ -91,7 +92,7 @@ def test_missing_or_unknown_session_rejected_and_not_dispatched():
 
 
 def test_notification_gets_202():
-    client = TestClient(t.create_app(_FakeServer()))
+    client = ws_client(_FakeServer())
     sid = _init(client).headers[t.SESSION_HEADER]
     r = client.post("/mcp", json={"jsonrpc": "2.0", "method": "notifications/initialized"},
                     headers={t.SESSION_HEADER: sid})
@@ -99,13 +100,13 @@ def test_notification_gets_202():
 
 
 def test_bad_json_and_batch_rejected():
-    client = TestClient(t.create_app(_FakeServer()))
+    client = ws_client(_FakeServer())
     assert client.post("/mcp", content=b"{not json").status_code == 400
     assert client.post("/mcp", json=[{"jsonrpc": "2.0", "id": 1, "method": "initialize"}]).status_code == 400
 
 
 def test_handler_exception_fails_closed_without_leaking():
-    client = TestClient(t.create_app(_FakeServer()))
+    client = ws_client(_FakeServer())
     sid = _init(client).headers[t.SESSION_HEADER]
     r = client.post("/mcp", json={"jsonrpc": "2.0", "id": 9, "method": "boom"},
                     headers={t.SESSION_HEADER: sid})
@@ -114,11 +115,11 @@ def test_handler_exception_fails_closed_without_leaking():
 
 
 def test_foreign_origin_rejected_on_loopback_bind():
-    client = TestClient(t.create_app(_FakeServer()))
+    client = ws_client(_FakeServer())
     assert _init(client, headers={"Origin": "https://evil.example"}).status_code == 403
     assert _init(client, headers={"Origin": "http://localhost:3000"}).status_code == 200
 
 
 def test_get_not_allowed():
-    client = TestClient(t.create_app(_FakeServer()))
+    client = ws_client(_FakeServer())
     assert client.get("/mcp").status_code == 405

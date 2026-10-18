@@ -23,10 +23,17 @@ import ipaddress
 import json
 import os
 import secrets
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from graqle.plugins.mcp_session_state import SessionState, bind_session
+from graqle.plugins.mcp_session_state import SessionState, bind_session, set_http_serving
+from graqle.plugins.mcp_workspace import (
+    WORKSPACE_HEADER,
+    WorkspaceError,
+    bind_root,
+    confine_arguments,
+)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_TOKEN_ENV = "GRAQLE_MCP_HTTP_TOKEN"
@@ -79,15 +86,25 @@ def _names_other_project(message: dict[str, Any], bound: str) -> bool:
 
 
 def create_app(
-    server: Any = None, host: str = DEFAULT_HOST, token: str | None = None, hub: Any = None
+    server: Any = None,
+    host: str = DEFAULT_HOST,
+    token: str | None = None,
+    hub: Any = None,
+    allowed_roots: list[Path] | None = None,
 ) -> Any:
     """Build the Starlette app serving *server* (a ``KogniDevServer``).
 
     With *hub* (a ``ProjectHub``, CR-INFRA-02 PR-d) the app serves several
     projects instead: each session is bound to one project at ``initialize``.
+
+    Single-server mode (CR-INFRA-02e) requires *allowed_roots*: each session
+    binds its workspace root once at ``initialize`` and every tool call is
+    confined to it.
     """
     if (server is None) == (hub is None):
         raise HttpTransportConfigError("pass exactly one of server or hub")
+    if server is not None and not allowed_roots:
+        raise HttpTransportConfigError("a shared server needs allowed_roots (--allowed-roots)")
     from starlette.applications import Starlette
     from starlette.requests import Request
     from starlette.responses import JSONResponse, Response
@@ -136,9 +153,24 @@ def create_app(
                 )
             if not hub.has(requested_project):
                 return JSONResponse(_rpc_error(-32600, "unknown project"), status_code=404)
+        workspace_value = request.headers.get(WORKSPACE_HEADER, "")
+        new_root: Path | None = None
+        if server is not None and message.get("method") == "initialize":
+            try:
+                new_root = bind_root(workspace_value, allowed_roots or [])
+            except WorkspaceError as exc:
+                return JSONResponse(_rpc_error(-32002, str(exc)), status_code=403)
+            existing = sessions.get(request.headers.get(SESSION_HEADER, ""))
+            if existing is not None and existing.workspace_root != new_root:
+                return JSONResponse(
+                    _rpc_error(-32002, "workspace root is already bound and cannot change"),
+                    status_code=403,
+                )
         if message.get("method") == "initialize":
             session_id = secrets.token_hex(16)
-            sessions[session_id] = SessionState()
+            sessions[session_id] = SessionState(
+                workspace_root=new_root, http_mode=server is not None
+            )
             if hub is not None:
                 session_projects[session_id] = requested_project
             headers[SESSION_HEADER] = session_id
@@ -157,8 +189,42 @@ def create_app(
             if _names_other_project(message, bound):
                 return JSONResponse(_rpc_error(-32002, "request names another project"), status_code=403)
 
+        state = sessions[session_id]
+        if server is not None:
+            root = state.workspace_root
+            if root is None:  # cannot happen after initialize; fail closed anyway
+                return JSONResponse(_rpc_error(-32002, "workspace root not bound"), status_code=403)
+            if workspace_value:
+                try:
+                    if bind_root(workspace_value, allowed_roots or []) != root:
+                        raise WorkspaceError("workspace root is already bound and cannot change")
+                except WorkspaceError as exc:
+                    return JSONResponse(_rpc_error(-32002, str(exc)), status_code=403)
+            params = message.get("params")
+            if message.get("method") == "tools/call" and isinstance(params, dict):
+                try:
+                    arguments = params.get("arguments") or {}
+                    if not isinstance(arguments, dict):
+                        raise WorkspaceError("tool arguments must be an object")
+                    message = {
+                        **message,
+                        "params": {
+                            **params,
+                            "arguments": confine_arguments(root, str(params.get("name", "")), arguments),
+                        },
+                    }
+                except WorkspaceError as exc:
+                    return JSONResponse(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": message.get("id"),
+                            "result": {"content": [{"type": "text", "text": str(exc)}], "isError": True},
+                        },
+                        headers=headers,
+                    )
+
         try:
-            with bind_session(sessions[session_id]):
+            with bind_session(state):
                 if hub is not None:
                     response = await hub.dispatch(bound, message)
                 else:
@@ -195,10 +261,12 @@ def run_http(
     port: int = 8765,
     token_env: str = DEFAULT_TOKEN_ENV,
     hub: Any = None,
+    allowed_roots: list[Path] | None = None,
 ) -> None:
     """Validate the bind/auth configuration, then serve until interrupted."""
     import uvicorn
 
     token = resolve_auth_token(host, token_env)  # raises before anything binds
-    app = create_app(server, host=host, token=token, hub=hub)
+    app = create_app(server, host=host, token=token, hub=hub, allowed_roots=allowed_roots)
+    set_http_serving(server is not None)
     uvicorn.run(app, host=host, port=port, log_level="info")

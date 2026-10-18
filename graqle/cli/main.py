@@ -280,6 +280,11 @@ def mcp_serve(
     projects: str = typer.Option(
         None, "--projects", help="projects.yaml: serve several separate project graphs (http only)"
     ),
+    allowed_roots: str = typer.Option(
+        None, "--allowed-roots",
+        help="http only: comma-separated directories a session's workspace root must lie in "
+        "(required for a single shared server)",
+    ),
 ) -> None:
     """Start the GraQle MCP development server (stdio transport by default).
 
@@ -339,8 +344,21 @@ def mcp_serve(
                 raise typer.Exit(2)
             run_http(host=host, port=port, hub=hub)
             return
+        from graqle.plugins.mcp_workspace import WorkspaceError, parse_allowed_roots
+
+        if not allowed_roots:
+            console.print("[red]--transport http needs --allowed-roots PATH[,PATH...] (CR-INFRA-02e).[/red]")
+            raise typer.Exit(2)
+        try:
+            roots = parse_allowed_roots(allowed_roots)
+        except WorkspaceError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(2)
         os.environ.setdefault("GRAQLE_SERVE_CWD", str(Path.cwd()))
-        run_http(KogniDevServer(config_path=config, read_only=read_only), host=host, port=port)
+        run_http(
+            KogniDevServer(config_path=config, read_only=read_only),
+            host=host, port=port, allowed_roots=roots,
+        )
         return
 
     # Anchor CWD so _graph_file resolves against project root, not IDE spawn dir.
@@ -400,6 +418,10 @@ def mcp_relay(
     project: str = typer.Option(
         None, "--project", help="Project name on a multi-project hub (graq mcp serve --projects)"
     ),
+    workspace_root: str = typer.Option(
+        None, "--workspace-root",
+        help="Workspace root the server confines this session to (default: current directory)",
+    ),
 ) -> None:
     """Thin stdio MCP relay to a shared server (no graph is loaded here).
 
@@ -409,7 +431,7 @@ def mcp_relay(
     from graqle.plugins.mcp_relay import RelayConfigError, run_relay
 
     try:
-        run_relay(url, project=project)
+        run_relay(url, project=project, workspace_root=workspace_root)
     except RelayConfigError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(2)
