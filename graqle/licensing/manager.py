@@ -112,6 +112,8 @@ TIER_FEATURES: dict[LicenseTier, set[str]] = {
         "cloud_metrics",
         "shared_graph",
         "cross_repo",
+        # Several separate project graphs in one shared MCP server (REL-HUB-01).
+        "multi_project_hub",
     },
     LicenseTier.ENTERPRISE: {
         "private_deployment",

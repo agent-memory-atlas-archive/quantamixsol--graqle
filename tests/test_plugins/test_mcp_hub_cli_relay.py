@@ -62,7 +62,8 @@ def test_serve_projects_requires_http_transport():
     assert "requires --transport http" in result.output
 
 
-def test_serve_with_invalid_projects_file_refuses_to_start(tmp_path):
+def test_serve_with_invalid_projects_file_refuses_to_start(tmp_path, monkeypatch):
+    monkeypatch.setattr("graqle.licensing.manager.has_feature", lambda feature: True)
     bad = tmp_path / "projects.yaml"
     bad.write_text("projects: {}\n", encoding="utf-8")
     result = CliRunner().invoke(

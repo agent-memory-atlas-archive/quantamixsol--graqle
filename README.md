@@ -270,6 +270,14 @@ If you operate in a regulated environment, the same substrate produces complianc
 
 ---
 
+## Run many agents on one graph
+
+Start one shared server with `graq mcp serve --transport http` and point each MCP client at it with `graq mcp relay`, instead of loading the graph once per client. Several projects in one server (`--projects`) is a Team / Enterprise feature.
+
+→ [Run many agents on one graph](./docs/run-many-agents-on-one-graph.md) — setup, SSH tunnel for teammates, token and HTTPS, editions, measured memory.
+
+---
+
 ## Pricing
 
 | Tier | What you get |

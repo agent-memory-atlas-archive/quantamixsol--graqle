@@ -328,6 +328,15 @@ def mcp_serve(
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(2)
         if projects is not None:
+            from graqle.licensing.manager import has_feature
+
+            if not has_feature("multi_project_hub"):
+                console.print(
+                    "[red]--projects (several project graphs in one server) needs the Team or "
+                    "Enterprise edition. Community edition serves one graph: use "
+                    "--transport http without --projects. Run 'graq doctor' to see your edition.[/red]"
+                )
+                raise typer.Exit(2)
             from graqle.plugins.mcp_project_hub import (
                 HubConfigError,
                 ProjectHub,
