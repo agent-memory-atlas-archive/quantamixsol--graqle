@@ -950,6 +950,7 @@ def serve(
     import pathlib
     os.environ["GRAQLE_CONFIG_PATH"] = str(pathlib.Path(config).resolve())
     os.environ["GRAQLE_SERVE_CWD"] = str(pathlib.Path.cwd())
+    os.environ["GRAQLE_SERVE_HOST"] = host
     if read_only:
         os.environ["GRAQLE_READ_ONLY"] = "1"
 
