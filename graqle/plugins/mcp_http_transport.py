@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from graqle.plugins.mcp_relay_gate import content_scan, evaluate_gate, graph_snapshot
+from graqle.plugins.mcp_relay_routing import canonical_name
 from graqle.plugins.mcp_session_state import SessionState, bind_session, set_http_serving
 from graqle.plugins.mcp_workspace import (
     WORKSPACE_HEADER,
@@ -39,6 +41,8 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_TOKEN_ENV = "GRAQLE_MCP_HTTP_TOKEN"
 SESSION_HEADER = "mcp-session-id"
 MCP_PATH = "/mcp"
+RELAY_GATE_PATH = "/relay/gate"  # CR-INFRA-02f: per-mutation gate check for the hybrid relay
+RELAY_SNAPSHOT_PATH = "/relay/snapshot"  # CR-INFRA-02f: versioned graph snapshot
 PROJECT_HEADER = "x-graqle-project"  # hub mode: binds a session to one project
 
 
@@ -251,8 +255,52 @@ def create_app(
         session_projects.pop(session_id, None)
         return Response(status_code=200)
 
+    def _relay_session(request: Request) -> tuple[SessionState | None, Response | None]:
+        """Authenticate a relay side-channel request and look up its session."""
+        denied = _check(request)
+        if denied is not None:
+            return None, denied
+        if server is None:  # hub mode has no per-session gate: fail closed
+            return None, JSONResponse({"allow": False, "reason": "unsupported in hub mode"}, status_code=403)
+        state = sessions.get(request.headers.get(SESSION_HEADER, ""))
+        if state is None or state.workspace_root is None:
+            return None, JSONResponse({"allow": False, "reason": "unknown session"}, status_code=404)
+        return state, None
+
+    async def relay_gate(request: Request) -> Response:
+        """CR-INFRA-02f: may this session perform this local mutation right now?"""
+        state, denied = _relay_session(request)
+        if denied is not None:
+            return denied
+        assert state is not None and state.workspace_root is not None
+        try:
+            body = json.loads(await request.body())
+            tool, arguments = body["tool"], body.get("arguments") or {}
+            if not isinstance(tool, str) or not isinstance(arguments, dict):
+                raise ValueError("bad shape")
+        except (ValueError, KeyError, UnicodeDecodeError, TypeError):
+            return JSONResponse({"allow": False, "reason": "malformed gate request"}, status_code=400)
+        verdict = evaluate_gate(server, state, tool, arguments, state.workspace_root)
+        if verdict["allow"] and canonical_name(tool) == "graq_write" and not arguments.get("dry_run", True):
+            try:
+                verdict = await content_scan(server, state, arguments, state.workspace_root)
+            except Exception as exc:  # fail closed
+                verdict = {"allow": False, "reason": f"content scan failed ({type(exc).__name__})"}
+        return JSONResponse(verdict)
+
+    async def relay_snapshot(request: Request) -> Response:
+        state, denied = _relay_session(request)
+        if denied is not None:
+            return denied
+        return JSONResponse(graph_snapshot(server))
+
     return Starlette(
-        routes=[Route(MCP_PATH, post, methods=["POST"]), Route(MCP_PATH, delete, methods=["DELETE"])]
+        routes=[
+            Route(MCP_PATH, post, methods=["POST"]),
+            Route(MCP_PATH, delete, methods=["DELETE"]),
+            Route(RELAY_GATE_PATH, relay_gate, methods=["POST"]),
+            Route(RELAY_SNAPSHOT_PATH, relay_snapshot, methods=["POST"]),
+        ]
     )
 
 

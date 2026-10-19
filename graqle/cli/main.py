@@ -431,6 +431,11 @@ def mcp_relay(
         None, "--workspace-root",
         help="Workspace root the server confines this session to (default: current directory)",
     ),
+    local_tools: bool = typer.Option(
+        None, "--local-tools/--no-local-tools",
+        help="Run file/git/bash/test tools on THIS machine's workspace (CR-INFRA-02f); "
+        "default: on when the server is not on this machine's loopback",
+    ),
 ) -> None:
     """Thin stdio MCP relay to a shared server (no graph is loaded here).
 
@@ -440,7 +445,7 @@ def mcp_relay(
     from graqle.plugins.mcp_relay import RelayConfigError, run_relay
 
     try:
-        run_relay(url, project=project, workspace_root=workspace_root)
+        run_relay(url, project=project, workspace_root=workspace_root, local_tools=local_tools)
     except RelayConfigError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(2)

@@ -90,6 +90,48 @@ class Relay:
             raise RelayConfigError("refusing to send the auth token over plain http to a non-loopback host")
         self._token = token
         self._session_id: str | None = None
+        self.local_root = root  # the user's own workspace root (local tools run here)
+
+    def post_side(self, kind: str, body: dict[str, Any], timeout: float) -> dict[str, Any]:
+        """POST to the hub's ``/relay/<kind>`` side channel (CR-INFRA-02f).
+
+        Raises ``HubUnavailable`` on any problem: unreachable, timeout, non-200,
+        non-JSON or oversize reply. Nothing is retried, cached or queued.
+        """
+        from graqle.plugins.mcp_relay_hybrid import SNAPSHOT_MAX_BYTES, HubUnavailable
+
+        if self._session_id is None:
+            raise HubUnavailable("no hub session yet")
+        parsed = urlparse(self.url)
+        base = parsed.path.rsplit("/", 1)[0]
+        url = parsed._replace(path=f"{base}/relay/{kind}").geturl()
+        headers = {"Content-Type": "application/json", "Accept": "application/json", SESSION_HEADER: self._session_id}
+        if self._token is not None:
+            headers["Authorization"] = f"Bearer {self._token}"
+        req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (scheme validated)
+                raw = resp.read(SNAPSHOT_MAX_BYTES + 1)
+                status = resp.status
+        except urllib.error.HTTPError as exc:
+            try:  # a 4xx carrying a verdict is still a verdict (a refusal)
+                answer = json.loads(exc.read(SNAPSHOT_MAX_BYTES))
+                if isinstance(answer, dict) and answer.get("allow") is False:
+                    return answer
+            except Exception:  # noqa: BLE001 - falls through to unavailable
+                pass
+            raise HubUnavailable(f"HTTP {exc.code}") from exc
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            raise HubUnavailable(type(exc).__name__) from exc
+        if status != 200 or len(raw) > SNAPSHOT_MAX_BYTES:
+            raise HubUnavailable("bad status or oversize reply")
+        try:
+            answer = json.loads(raw)
+        except ValueError as exc:
+            raise HubUnavailable("non-JSON reply") from exc
+        if not isinstance(answer, dict):
+            raise HubUnavailable("invalid reply")
+        return answer
 
     def forward(self, message: dict[str, Any]) -> dict[str, Any] | None:
         """POST *message*; return the reply, or None for a notification (202)."""
@@ -145,11 +187,23 @@ def run_relay(
     stdout: TextIO | None = None,
     project: str | None = None,
     workspace_root: str | None = None,
+    local_tools: bool | None = None,
 ) -> None:
-    """Relay newline-delimited JSON-RPC from stdin to the server until EOF."""
+    """Relay newline-delimited JSON-RPC from stdin to the server until EOF.
+
+    *local_tools* (CR-INFRA-02f): ``None`` = on when the server is not on this
+    machine's loopback; ``False`` = every call is forwarded (previous behaviour).
+    """
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
     relay = Relay(url, os.environ.get(token_env, "").strip() or None, project, workspace_root)
+    if local_tools is None:
+        local_tools = not _is_loopback(urlparse(relay.url).hostname or "")
+    dispatcher = None
+    if local_tools:
+        from graqle.plugins.mcp_relay_hybrid import HybridDispatcher
+
+        dispatcher = HybridDispatcher(relay.local_root, relay.forward, relay.post_side)
     for line in stdin:
         line = line.strip()
         if not line:
@@ -167,7 +221,10 @@ def run_relay(
                     "error": {"code": -32600, "message": "Invalid Request: expected a single JSON object"},
                 }
             else:
-                reply = relay.forward(message)
+                if dispatcher is not None and message.get("method") == "tools/call":
+                    reply = dispatcher.handle(message)
+                else:
+                    reply = relay.forward(message)
                 if reply is not None and "id" not in message:
                     print(f"graq mcp relay: dropped error for notification: {reply}", file=sys.stderr)
                     reply = None

@@ -1,0 +1,3 @@
+command: python scripts/measure_relay_rss.py   (run from the repository root, Linux, Python 3.10 venv with graqle installed)
+output : see CR-INFRA-02f-relay-rss.json (same directory), produced by that command with local tools active
+         (three local calls answered: graq_read, graq_glob, graq_grep; hub URL not listening).
