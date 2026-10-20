@@ -190,38 +190,39 @@ def create_app(
                 return JSONResponse(_rpc_error(-32002, "request names another project"), status_code=403)
 
         state = sessions[session_id]
-        if server is not None:
-            root = state.workspace_root
-            if root is None:  # cannot happen after initialize; fail closed anyway
-                return JSONResponse(_rpc_error(-32002, "workspace root not bound"), status_code=403)
-            if workspace_value:
-                try:
-                    if bind_root(workspace_value, allowed_roots or []) != root:
-                        raise WorkspaceError("workspace root is already bound and cannot change")
-                except WorkspaceError as exc:
-                    return JSONResponse(_rpc_error(-32002, str(exc)), status_code=403)
-            params = message.get("params")
-            if message.get("method") == "tools/call" and isinstance(params, dict):
-                try:
-                    arguments = params.get("arguments") or {}
-                    if not isinstance(arguments, dict):
-                        raise WorkspaceError("tool arguments must be an object")
-                    message = {
-                        **message,
-                        "params": {
-                            **params,
-                            "arguments": confine_arguments(root, str(params.get("name", "")), arguments),
-                        },
-                    }
-                except WorkspaceError as exc:
-                    return JSONResponse(
-                        {
-                            "jsonrpc": "2.0",
-                            "id": message.get("id"),
-                            "result": {"content": [{"type": "text", "text": str(exc)}], "isError": True},
-                        },
-                        headers=headers,
-                    )
+        # Single-server: the root bound at initialize. Hub (INFRA-02g): the bound
+        # project's own root. Either way every tool call is confined to it.
+        root = state.workspace_root if server is not None else hub.root_of(bound)
+        if root is None:  # cannot happen after initialize; fail closed anyway
+            return JSONResponse(_rpc_error(-32002, "workspace root not bound"), status_code=403)
+        if server is not None and workspace_value:
+            try:
+                if bind_root(workspace_value, allowed_roots or []) != root:
+                    raise WorkspaceError("workspace root is already bound and cannot change")
+            except WorkspaceError as exc:
+                return JSONResponse(_rpc_error(-32002, str(exc)), status_code=403)
+        params = message.get("params")
+        if message.get("method") == "tools/call" and isinstance(params, dict):
+            try:
+                arguments = params.get("arguments") or {}
+                if not isinstance(arguments, dict):
+                    raise WorkspaceError("tool arguments must be an object")
+                message = {
+                    **message,
+                    "params": {
+                        **params,
+                        "arguments": confine_arguments(root, str(params.get("name", "")), arguments),
+                    },
+                }
+            except WorkspaceError as exc:
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": message.get("id"),
+                        "result": {"content": [{"type": "text", "text": str(exc)}], "isError": True},
+                    },
+                    headers=headers,
+                )
 
         try:
             with bind_session(state):

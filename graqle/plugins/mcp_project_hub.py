@@ -175,6 +175,10 @@ class ProjectHub:
     def has(self, name: str) -> bool:
         return name in self._entries
 
+    def root_of(self, name: str) -> Path:
+        """The (resolved) project root a session bound to *name* is confined to."""
+        return self._entries[name].spec.root
+
     def status(self, name: str) -> str:
         return self._entries[name].state
 

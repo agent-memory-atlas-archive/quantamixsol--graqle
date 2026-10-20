@@ -128,6 +128,41 @@ def test_gate_state_is_per_project_session(client):
     assert _tool(c, b, "graq_bash", {"command": "true"}).get("error") == "CG-01_SESSION_GATE"
 
 
+def _confined(result: dict) -> bool:
+    return "escapes the session workspace root" in json.dumps(result) or "'..' is not allowed" in json.dumps(result)
+
+
+def test_path_arguments_cannot_escape_the_project_root(client):
+    """INFRA-02g: '..', absolute paths and symlinks cannot reach another project."""
+    c, root = client
+    secret = root / "pb" / "secret.txt"
+    secret.write_text("only-in-b", encoding="utf-8")
+    (root / "pa" / "link_to_b").symlink_to(root / "pb", target_is_directory=True)
+    a = _open(c, "a")
+    attempts = [
+        "../pb/secret.txt",
+        str(secret),
+        "link_to_b/secret.txt",
+    ]
+    for path in attempts:
+        result = _tool(c, a, "graq_read", {"file_path": path})
+        assert _confined(result), (path, result)
+        assert "only-in-b" not in json.dumps(result), (path, result)
+
+
+def test_path_inside_own_project_is_allowed(client):
+    c, root = client
+    (root / "pa" / "own.txt").write_text("only-in-a", encoding="utf-8")
+    a = _open(c, "a")
+    assert "only-in-a" in json.dumps(_tool(c, a, "graq_read", {"file_path": "own.txt"}))
+
+
+def test_non_object_tool_arguments_fail_closed(client):
+    c, _ = client
+    a = _open(c, "a")
+    assert "must be an object" in json.dumps(_tool(c, a, "graq_read", ["x"]))
+
+
 def test_app_requires_exactly_one_of_server_or_hub():
     with pytest.raises(t.HttpTransportConfigError):
         t.create_app()
