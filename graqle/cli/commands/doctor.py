@@ -47,6 +47,20 @@ INFO = "info"
 CheckResult = tuple[str, str, str]  # (status, label, detail)
 
 
+def _check_caps() -> CheckResult:
+    """Report cap enforcement state (CR-LIC-01): state only, never limit values.
+
+    Never "off" on a free tier. Fails closed: any error reports "enforced".
+    """
+    try:
+        from graqle.licensing.caps import caps_state
+
+        state = caps_state()
+    except Exception:  # noqa: BLE001
+        state = "enforced"
+    return (PASS, "Caps", f"caps: {state}")
+
+
 def _check_python_version() -> CheckResult:
     v = sys.version_info
     ver_str = f"{v.major}.{v.minor}.{v.micro}"
@@ -1025,6 +1039,7 @@ def doctor_command(
     all_results: list[CheckResult] = []
 
     # Run all checks
+    all_results.append(_check_caps())
     all_results.append(_check_python_version())
     all_results.append(_check_graq_on_path())
     all_results.extend(_check_core_deps())
