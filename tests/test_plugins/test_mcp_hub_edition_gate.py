@@ -22,11 +22,20 @@ def test_feature_belongs_to_team_not_free():
     assert "multi_project_hub" not in TIER_FEATURES[LicenseTier.PRO]
 
 
+def test_enterprise_licence_inherits_the_feature():
+    from datetime import datetime, timezone
+
+    from graqle.licensing.manager import License
+
+    lic = License(tier=LicenseTier.ENTERPRISE, holder="t", email="t@example.com", issued_at=datetime.now(timezone.utc))
+    assert "multi_project_hub" in lic.all_features
+
+
 def test_community_refuses_projects_and_names_edition(tmp_path, monkeypatch):
     monkeypatch.setattr("graqle.licensing.manager.has_feature", lambda feature: False)
     result = _invoke(tmp_path)
     assert result.exit_code == 2
-    assert "Team or Enterprise edition" in result.output
+    assert "Team or Enterprise edition" in " ".join(result.output.split())  # click wraps lines
     # The refusal comes before the projects file is read.
     assert "non-empty 'projects' mapping" not in result.output
 

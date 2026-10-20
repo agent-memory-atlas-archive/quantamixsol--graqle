@@ -154,6 +154,7 @@ def test_path_inside_own_project_is_allowed(client):
     c, root = client
     (root / "pa" / "own.txt").write_text("only-in-a", encoding="utf-8")
     a = _open(c, "a")
+    _unlock(c, a)
     assert "only-in-a" in json.dumps(_tool(c, a, "graq_read", {"file_path": "own.txt"}))
 
 
