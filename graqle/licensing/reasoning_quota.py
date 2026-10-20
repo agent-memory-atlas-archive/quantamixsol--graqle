@@ -188,8 +188,8 @@ class ReasoningQuota:
     # -- tamper evidence (CR-LIC-01 AC-3) -----------------------------------
     # A sibling record in the user-level ``~/.graqle`` dir, keyed by project, so that
     # deleting or corrupting the project-local file is not a counter reset: the count
-    # resumes from the higher of the two. Local and simple; ADR-245 still accepts
-    # deliberate local edits of both files. If the user dir is unavailable the project
+    # resumes from the higher of the two. Local and simple; deliberate local
+    # edits of both files are still accepted. If the user dir is unavailable the project
     # file alone counts - enforcement is never relaxed by a marker fault.
 
     def _marker_path(self) -> Path | None:
