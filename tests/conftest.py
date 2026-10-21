@@ -8,6 +8,9 @@ collect_ignore = [
     "test_ontology/test_ontology_generator.py",
 ]
 
+# pytester fixture: used by tests/test_known_failures_list.py (TEST-01) to run an isolated pytest session.
+pytest_plugins = ["pytester"]
+
 # TEST-01: tracked known-failures list (tests/known_failures.json).
 from tests._known_failures import pytest_collection_modifyitems  # noqa: E402,F401
 
