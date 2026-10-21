@@ -4,7 +4,7 @@ All notable changes to GraQle are documented in this file.
 
 ---
 
-## 0.86.0 — 2026-10-18 (Shared server and relay)
+## 0.86.0 — 2026-10-21 (Shared server and relay)
 
 ### Added
 
@@ -13,6 +13,9 @@ All notable changes to GraQle are documented in this file.
   `.mcp.json` only changes its command. Each session has its own gate state and its own workspace root
   (`--allowed-roots`, `--workspace-root`). Non-loopback binds refuse to start without `GRAQLE_MCP_HTTP_TOKEN`.
   Default `graq mcp serve` (stdio) is unchanged.
+- **Hybrid relay.** File, git, shell and test tools run on your own machine, in your own workspace, while the
+  graph stays on the shared server; the server checks the gates for every change. So a teammate on a remote
+  server edits their own files, not the server's.
 - **Multi-project hub (Team / Enterprise).** `graq mcp serve --projects projects.yaml` serves several separate
   project graphs from one server with lazy load, idle unload and a memory-budget LRU. Without a Team or Enterprise
   licence it refuses to start and names the edition.
@@ -25,6 +28,11 @@ All notable changes to GraQle are documented in this file.
 - Studio cache entries are keyed by owner and project, so one tenant's cached data is not served to another.
 - Conditional S3 push (ETag) so a concurrent push no longer silently overwrites; push fails closed without an API key.
 - Server authentication fails closed instead of open when no valid credential is configured.
+- In multi-project mode, file paths in tool calls are confined to the project's own root.
+
+### Changed
+
+- Free-tier limits are enforced consistently.
 
 ---
 
