@@ -19,8 +19,15 @@ REQUIRED_FIELDS = ("nodeid", "reason", "owner")
 
 
 def load_known_failures() -> dict[str, dict]:
-    data = json.loads(KNOWN_FAILURES_PATH.read_text(encoding="utf-8"))
-    entries = data["known_failures"]
+    try:
+        data = json.loads(KNOWN_FAILURES_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise pytest.UsageError(f"{KNOWN_FAILURES_PATH.name}: unreadable: {exc}") from exc
+    entries = data.get("known_failures") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        raise pytest.UsageError(
+            f'{KNOWN_FAILURES_PATH.name}: missing "known_failures" list'
+        )
     result: dict[str, dict] = {}
     for entry in entries:
         missing = [f for f in REQUIRED_FIELDS if not str(entry.get(f, "")).strip()]

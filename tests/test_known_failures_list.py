@@ -29,6 +29,15 @@ def test_entry_missing_owner_aborts_collection(tmp_path, monkeypatch):
         kf.load_known_failures()
 
 
+@pytest.mark.parametrize("content", ["{not json", "{}", '{"known_failures": 3}'])
+def test_unreadable_or_wrong_shape_aborts_collection(tmp_path, monkeypatch, content):
+    bad = tmp_path / "known_failures.json"
+    bad.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(kf, "KNOWN_FAILURES_PATH", bad)
+    with pytest.raises(pytest.UsageError):
+        kf.load_known_failures()
+
+
 def test_listed_failure_runs_as_xfail_and_unlisted_still_fails(pytester, monkeypatch):
     repo_root = Path(__file__).resolve().parents[1]
     monkeypatch.setenv("PYTHONPATH", str(repo_root))
