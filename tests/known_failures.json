@@ -1,0 +1,20 @@
+{
+  "_comment": "TEST-01: tracked environment-dependent failures. Every entry needs nodeid, reason, owner. Listed tests run and are reported as xfail (non-strict); any failure NOT listed here still fails the run. Remove an entry when its cause is fixed.",
+  "known_failures": [
+    {
+      "nodeid": "tests/test_distribution/test_no_internal_strings.py::test_advisory_package_wide_leakage",
+      "reason": "Package-wide internal-reference count is non-zero in this tree (distribution lint finds existing references); needs a dedicated cleanup task.",
+      "owner": "sdk-team"
+    },
+    {
+      "nodeid": "tests/test_plugins/test_chat_02_intent_hint.py::test_extra_unknown_args_pass_through_safely",
+      "reason": "ImportError: _GraqleBackedDriver is not exported by graqle.chat.mcp_handlers in this tree.",
+      "owner": "sdk-team"
+    },
+    {
+      "nodeid": "tests/test_activation/test_local_backend_integration.py::test_L_01_local_semantic_matches_query_topic",
+      "reason": "Embedding-dimension mismatch (1024 vs 128) from the locally available embedding model; depends on the environment's model.",
+      "owner": "sdk-team"
+    }
+  ]
+}

@@ -23,7 +23,7 @@ router = APIRouter()
 # ---------- Per-Project Graph Loading ----------
 
 # Cache loaded project graphs to avoid re-downloading on every request
-_project_graph_cache: dict[str, object] = {}
+_project_graph_cache: dict[tuple[str, str], object] = {}
 
 
 async def _load_project_graph(request: Request, project: str):
@@ -37,10 +37,6 @@ async def _load_project_graph(request: Request, project: str):
     """
     import json
     import os
-
-    # Check cache first
-    if project in _project_graph_cache:
-        return _project_graph_cache[project]
 
     # V-A1B-NATIVE-002: native Edit — graq_edit literal failed "file not found"
     # (S-010: MCP resolves relative path against site-packages, not graqle-sdk/).
@@ -61,6 +57,13 @@ async def _load_project_graph(request: Request, project: str):
     if not owner:
         logger.debug("No verified identity for project graph loading")
         return None
+
+    # SEC-01: the owner is verified BEFORE any cache lookup and the cache is
+    # keyed on (owner, project), so a hit never skips verification and two
+    # tenants sharing a project name never share a cached graph.
+    cache_key = (owner, project)
+    if cache_key in _project_graph_cache:
+        return _project_graph_cache[cache_key]
 
     # Compute S3 key (owner = sha256(email) for self, or 'team-{id}' for team graph)
     bucket = os.environ.get("GRAQLE_GRAPHS_BUCKET", "graqle-graphs-eu")
@@ -116,7 +119,7 @@ async def _load_project_graph(request: Request, project: str):
         # Cache for warm invocations (max 5 projects to limit memory)
         if len(_project_graph_cache) >= 5:
             _project_graph_cache.pop(next(iter(_project_graph_cache)))
-        _project_graph_cache[project] = g
+        _project_graph_cache[cache_key] = g
 
         return g
 

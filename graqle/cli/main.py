@@ -270,8 +270,23 @@ def mcp_serve(
     read_only: bool = typer.Option(
         False, "--read-only", help="Read-only mode: blocks mutation tools (graq_learn, graq_reload)"
     ),
+    transport: str = typer.Option(
+        "stdio", "--transport", help="Transport: stdio (default) or http (shared server, CR-INFRA-02)"
+    ),
+    host: str = typer.Option(
+        "127.0.0.1", "--host", help="HTTP bind host (non-loopback requires GRAQLE_MCP_HTTP_TOKEN)"
+    ),
+    port: int = typer.Option(8765, "--port", help="HTTP bind port"),
+    projects: str = typer.Option(
+        None, "--projects", help="projects.yaml: serve several separate project graphs (http only)"
+    ),
+    allowed_roots: str = typer.Option(
+        None, "--allowed-roots",
+        help="http only: comma-separated directories a session's workspace root must lie in "
+        "(required for a single shared server)",
+    ),
 ) -> None:
-    """Start the GraQle MCP development server (stdio transport).
+    """Start the GraQle MCP development server (stdio transport by default).
 
     Exposes development intelligence tools over JSON-RPC stdio:
       graq_context, graq_inspect, graq_reason, graq_preflight,
@@ -292,6 +307,68 @@ def mcp_serve(
 
     from graqle.__version__ import __version__
     from graqle.plugins.mcp_dev_server import KogniDevServer
+
+    if transport not in ("stdio", "http"):
+        console.print(f"[red]Unknown --transport {transport!r}; use stdio or http.[/red]")
+        raise typer.Exit(2)
+    if projects is not None and transport != "http":
+        console.print("[red]--projects requires --transport http.[/red]")
+        raise typer.Exit(2)
+    if transport == "http":
+        # Validate bind/auth BEFORE loading the graph; refuse unsafe config (fail closed).
+        from graqle.plugins.mcp_http_transport import (
+            HttpTransportConfigError,
+            resolve_auth_token,
+            run_http,
+        )
+
+        try:
+            resolve_auth_token(host)
+        except HttpTransportConfigError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(2)
+        if projects is not None:
+            from graqle.licensing.manager import has_feature
+
+            if not has_feature("multi_project_hub"):
+                console.print(
+                    "[red]--projects (several project graphs in one server) needs the Team or "
+                    "Enterprise edition. Community edition serves one graph: use "
+                    "--transport http without --projects. Run 'graq doctor' to see your edition.[/red]"
+                )
+                raise typer.Exit(2)
+            from graqle.plugins.mcp_project_hub import (
+                HubConfigError,
+                ProjectHub,
+                load_projects_file,
+            )
+
+            try:
+                hub = ProjectHub(
+                    load_projects_file(projects),
+                    lambda spec: KogniDevServer(config_path=spec.config, read_only=read_only),
+                )
+            except HubConfigError as exc:
+                console.print(f"[red]{exc}[/red]")
+                raise typer.Exit(2)
+            run_http(host=host, port=port, hub=hub)
+            return
+        from graqle.plugins.mcp_workspace import WorkspaceError, parse_allowed_roots
+
+        if not allowed_roots:
+            console.print("[red]--transport http needs --allowed-roots PATH[,PATH...] (CR-INFRA-02e).[/red]")
+            raise typer.Exit(2)
+        try:
+            roots = parse_allowed_roots(allowed_roots)
+        except WorkspaceError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(2)
+        os.environ.setdefault("GRAQLE_SERVE_CWD", str(Path.cwd()))
+        run_http(
+            KogniDevServer(config_path=config, read_only=read_only),
+            host=host, port=port, allowed_roots=roots,
+        )
+        return
 
     # Anchor CWD so _graph_file resolves against project root, not IDE spawn dir.
     # serve() already does this via GRAQLE_SERVE_CWD — mcp_serve must match.
@@ -340,6 +417,40 @@ def mcp_serve(
         else:
             console.print("  → Run 'graq doctor' to diagnose. Check graqle.yaml config.", file=sys.stderr)
         raise SystemExit(1)
+
+
+@mcp_app.command("relay")
+def mcp_relay(
+    url: str = typer.Option(
+        ..., "--url", help="Shared GraQle MCP HTTP server, e.g. http://127.0.0.1:8765 (CR-INFRA-02)"
+    ),
+    project: str = typer.Option(
+        None, "--project", help="Project name on a multi-project hub (graq mcp serve --projects)"
+    ),
+    workspace_root: str = typer.Option(
+        None, "--workspace-root",
+        help="Workspace root the server confines this session to (default: current directory)",
+    ),
+    local_tools: bool = typer.Option(
+        None, "--local-tools/--no-local-tools",
+        help="Run file/git/bash/test tools on THIS machine's workspace (CR-INFRA-02f); "
+        "default: on when the server is not on this machine's loopback",
+    ),
+) -> None:
+    """Thin stdio MCP relay to a shared server (no graph is loaded here).
+
+    Replace the command in .mcp.json:
+        { "mcpServers": { "graq": { "command": "graq", "args": ["mcp", "relay", "--url", "http://127.0.0.1:8765"] } } }
+    """
+    from graqle.plugins.mcp_relay import RelayConfigError, run_relay
+
+    try:
+        run_relay(url, project=project, workspace_root=workspace_root, local_tools=local_tools)
+    except RelayConfigError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2)
+    except KeyboardInterrupt:
+        pass
 
 
 @mcp_app.command("restart")
@@ -853,6 +964,7 @@ def serve(
     import pathlib
     os.environ["GRAQLE_CONFIG_PATH"] = str(pathlib.Path(config).resolve())
     os.environ["GRAQLE_SERVE_CWD"] = str(pathlib.Path.cwd())
+    os.environ["GRAQLE_SERVE_HOST"] = host
     if read_only:
         os.environ["GRAQLE_READ_ONLY"] = "1"
 

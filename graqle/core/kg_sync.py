@@ -118,6 +118,79 @@ def _get_push_state(path: str) -> _PushState:
 
 
 # ---------------------------------------------------------------------------
+# SEC-01 — conditional writes (ETag baseline per S3 key)
+# ---------------------------------------------------------------------------
+
+class KGPushConflictError(RuntimeError):
+    """The cloud graph changed since it was last read; the push was refused."""
+
+
+# ETag of the cloud object this process last read or wrote, keyed by S3 key.
+_known_etags: dict[str, str] = {}
+_known_etags_lock = threading.Lock()
+
+
+def _remember_etag(s3_key: str, etag: str | None) -> None:
+    if isinstance(etag, str) and etag:
+        with _known_etags_lock:
+            _known_etags[s3_key] = etag
+
+
+def _known_etag(s3_key: str) -> str | None:
+    with _known_etags_lock:
+        return _known_etags.get(s3_key)
+
+
+def _is_precondition_failure(exc: BaseException) -> bool:
+    """True iff exc is an S3 conditional-write rejection (412 / 409)."""
+    try:
+        import botocore.exceptions
+        if not isinstance(exc, botocore.exceptions.ClientError):
+            return False
+        code = exc.response.get("Error", {}).get("Code", "")
+        return code in ("PreconditionFailed", "412", "ConditionalRequestConflict", "409")
+    except Exception:
+        return False
+
+
+def conditional_put(
+    s3: Any,
+    s3_key: str,
+    data: bytes,
+    expected_etag: str | None,
+) -> str | None:
+    """Write ``data`` only if the cloud object is still the one we read.
+
+    ``expected_etag`` set  -> ``IfMatch`` (update exactly that version).
+    ``expected_etag`` None -> ``IfNoneMatch: *`` (create only; an existing
+    object means we have no baseline, so the write is refused).
+
+    Returns the new ETag. Raises KGPushConflictError on a precondition
+    failure — never a silent overwrite. Other errors propagate.
+    """
+    kwargs: dict[str, str] = (
+        {"IfMatch": expected_etag} if expected_etag else {"IfNoneMatch": "*"}
+    )
+    try:
+        resp = s3.put_object(
+            Bucket=S3_BUCKET,
+            Key=s3_key,
+            Body=data,
+            ContentType="application/json",
+            **kwargs,
+        )
+    except Exception as exc:
+        if _is_precondition_failure(exc):
+            raise KGPushConflictError(
+                f"Push to {s3_key} refused: the cloud graph changed since it was "
+                "last read (or was never pulled). Run 'graq cloud pull --merge' "
+                "and retry."
+            ) from exc
+        raise
+    return (resp or {}).get("ETag")
+
+
+# ---------------------------------------------------------------------------
 # Offline guard
 # ---------------------------------------------------------------------------
 
@@ -206,6 +279,7 @@ def pull_if_newer(
             return PullResult(reason=f"S3 head error: {code}")
 
         s3_last_modified: float = head["LastModified"].timestamp()
+        head_etag = head.get("ETag")
         local_mtime: float = local_path.stat().st_mtime if local_path.exists() else 0.0
 
         # Detect corrupt/empty local graph — pull regardless of timestamp.
@@ -239,6 +313,7 @@ def pull_if_newer(
                 logger.warning("Local graqle.json unreadable — forcing pull from S3")
 
         if s3_last_modified <= local_mtime and not local_is_corrupt:
+            _remember_etag(s3_key, head_etag)  # SEC-01: baseline for the next push
             return PullResult(reason="local is up to date")
 
         # S3 is newer (or local is corrupt) — download
@@ -248,6 +323,7 @@ def pull_if_newer(
             logger.info("Pulling KG from S3 (cloud newer by %.0fs)", s3_last_modified - local_mtime)
         response = s3.get_object(Bucket=S3_BUCKET, Key=s3_key)
         cloud_data = json.loads(response["Body"].read().decode("utf-8"))
+        _remember_etag(s3_key, response.get("ETag") or head_etag)  # SEC-01 baseline
 
         cloud_nodes: list[dict] = cloud_data.get("nodes", [])
         cloud_links: list[dict] = cloud_data.get("links", [])
@@ -361,12 +437,8 @@ def _push_worker(local_path: Path, project: str | None, retry_on_error: bool = T
             import boto3
             data = local_path.read_bytes()
             s3 = boto3.client("s3")
-            s3.put_object(
-                Bucket=S3_BUCKET,
-                Key=s3_key,
-                Body=data,
-                ContentType="application/json",
-            )
+            new_etag = conditional_put(s3, s3_key, data, _known_etag(s3_key))
+            _remember_etag(s3_key, new_etag)
             node_count = len(json.loads(data).get("nodes", []))
             logger.info(
                 "KG pushed to S3: %s (%d nodes, attempt %d)", s3_key, node_count, attempt
@@ -374,6 +446,10 @@ def _push_worker(local_path: Path, project: str | None, retry_on_error: bool = T
             return
         except ImportError:
             return  # boto3 not available — skip silently
+        except KGPushConflictError as exc:
+            # SEC-01: a conflict is visible and final — never retried, never overwritten.
+            logger.error("KG push CONFLICT: %s", exc)
+            return
         except Exception as exc:
             # dedupe AccessDenied at WARNING, log other errors at ERROR
             if attempt == 1 and retry_on_error:
@@ -410,6 +486,15 @@ def check_push_conflict(
         import botocore.exceptions
         s3 = boto3.client("s3")
         head = s3.head_object(Bucket=S3_BUCKET, Key=s3_key)
+        # SEC-01: same ETag precondition the background push enforces. If we hold
+        # a baseline and the cloud object no longer matches it, that is a conflict.
+        known = _known_etag(s3_key)
+        head_etag = head.get("ETag")
+        if known and isinstance(head_etag, str) and head_etag != known:
+            return True, (
+                "Cloud version changed since it was last pulled (ETag mismatch). "
+                "Run 'graq cloud pull --merge' first, or use --force to overwrite."
+            )
         s3_mtime = head["LastModified"].timestamp()
         if s3_mtime > local_mtime + 10:  # 10s grace window for clock skew
             delta = s3_mtime - local_mtime

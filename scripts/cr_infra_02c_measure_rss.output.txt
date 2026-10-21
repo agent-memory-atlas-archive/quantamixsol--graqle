@@ -1,0 +1,6 @@
+fixture_nodes=20000
+stdio_server_rss_mb=229.0,229.0,229.0
+stdio_3_servers_total_rss_mb=687.0
+relay_rss_mb=77.8,77.9,77.9
+shared_server_rss_mb=259.2
+shared_server_plus_3_relays_total_rss_mb=492.8

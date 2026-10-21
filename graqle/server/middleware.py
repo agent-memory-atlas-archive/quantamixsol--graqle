@@ -43,12 +43,48 @@ def get_configured_api_keys() -> set[str]:
     return keys
 
 
+UNAUTH_DEV_ENV = "GRAQLE_ALLOW_UNAUTHENTICATED_DEV"
+SERVE_HOST_ENV = "GRAQLE_SERVE_HOST"
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+class AuthConfigError(RuntimeError):
+    """Raised when the server would otherwise start without authentication."""
+
+
+def enforce_unauthenticated_dev_optin() -> None:
+    """Allow keyless startup only with the explicit loopback-only dev opt-in.
+
+    Requires ``GRAQLE_ALLOW_UNAUTHENTICATED_DEV=1`` AND a bind host that is
+    loopback, announced through ``GRAQLE_SERVE_HOST`` (set by ``graq serve``).
+    An unset or non-loopback host fails closed. Raises AuthConfigError.
+    """
+    optin = os.environ.get(UNAUTH_DEV_ENV, "").strip().lower() in ("1", "true", "yes")
+    host = os.environ.get(SERVE_HOST_ENV, "").strip().lower()
+    if not optin:
+        raise AuthConfigError(
+            "No API key configured (COGNIGRAPH_API_KEY / COGNIGRAPH_API_KEYS); "
+            "refusing to start an unauthenticated server. Configure a key, or for "
+            f"local development only set {UNAUTH_DEV_ENV}=1 with a loopback bind."
+        )
+    if host not in _LOOPBACK_HOSTS:
+        raise AuthConfigError(
+            f"{UNAUTH_DEV_ENV} is only honoured on a loopback bind "
+            f"(bind host: {host or 'unknown'}); refusing to start unauthenticated."
+        )
+    logger.warning(
+        "AUTHENTICATION DISABLED (%s=1, loopback bind %s) — local development only",
+        UNAUTH_DEV_ENV, host,
+    )
+
+
 def setup_auth_middleware(app) -> None:
     """Add API key authentication middleware to FastAPI app.
 
     Checks X-API-Key header or Authorization: Bearer <key>.
     Skips auth for /health and /docs endpoints.
-    Disabled when no API keys are configured (development mode).
+    With no API keys configured the server refuses to start unless the
+    explicit loopback-only dev opt-in is set (see enforce_unauthenticated_dev_optin).
     """
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.requests import Request
@@ -57,7 +93,9 @@ def setup_auth_middleware(app) -> None:
     valid_keys = get_configured_api_keys()
 
     if not valid_keys:
-        logger.info("No API keys configured — auth disabled (dev mode)")
+        # SEC-01: fail closed. No key means the server refuses to start unless
+        # the explicit loopback-only dev opt-in is set.
+        enforce_unauthenticated_dev_optin()
         return
 
     logger.info(f"API key auth enabled ({len(valid_keys)} key(s) configured)")

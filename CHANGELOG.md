@@ -4,6 +4,38 @@ All notable changes to GraQle are documented in this file.
 
 ---
 
+## 0.86.0 — 2026-10-21 (Shared server and relay)
+
+### Added
+
+- **One shared GraQle server for many agents.** `graq mcp serve --transport http` loads the graph once and serves it
+  over HTTP; `graq mcp relay` is a thin stdio process that forwards a client's requests to it, so an existing
+  `.mcp.json` only changes its command. Each session has its own gate state and its own workspace root
+  (`--allowed-roots`, `--workspace-root`). Non-loopback binds refuse to start without `GRAQLE_MCP_HTTP_TOKEN`.
+  Default `graq mcp serve` (stdio) is unchanged.
+- **Hybrid relay.** File, git, shell and test tools run on your own machine, in your own workspace, while the
+  graph stays on the shared server; the server checks the gates for every change. So a teammate on a remote
+  server edits their own files, not the server's.
+- **Multi-project hub (Team / Enterprise).** `graq mcp serve --projects projects.yaml` serves several separate
+  project graphs from one server with lazy load, idle unload and a memory-budget LRU. Without a Team or Enterprise
+  licence it refuses to start and names the edition.
+- Docs: [Run many agents on one graph](./docs/run-many-agents-on-one-graph.md). Measured on a 20,000-node fixture:
+  3 stdio servers 687.0 MB total against 492.8 MB for one shared server plus 3 relays (committed in
+  `scripts/cr_infra_02c_measure_rss.output.txt`).
+
+### Security
+
+- Studio cache entries are keyed by owner and project, so one tenant's cached data is not served to another.
+- Conditional S3 push (ETag) so a concurrent push no longer silently overwrites; push fails closed without an API key.
+- Server authentication fails closed instead of open when no valid credential is configured.
+- In multi-project mode, file paths in tool calls are confined to the project's own root.
+
+### Changed
+
+- Free-tier limits are enforced consistently.
+
+---
+
 ## 0.85.1 — 2026-10-10 (Community edition message)
 
 ### Fixed

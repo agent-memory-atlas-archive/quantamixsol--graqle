@@ -53,6 +53,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from graqle.plugins.mcp_session_state import (
+    PerSessionStateMixin,
+    WorkspaceNotBound,
+    session_workspace_root,
+)
+
 logger = logging.getLogger("graqle.mcp")
 
 
@@ -3369,7 +3375,7 @@ def _update_memory_index(memory_dir, filename, name, description, mem_type):
     return True
 
 
-class KogniDevServer:
+class KogniDevServer(PerSessionStateMixin):
     """MCP server exposing 7 governed development tools over stdio.
 
     Implements the Model Context Protocol JSON-RPC transport.
@@ -3828,7 +3834,7 @@ class KogniDevServer:
             raise FileNotFoundError(f"Cannot resolve: {file_path}")
 
         # 1. CWD-relative (preferred when CWD differs from graph root — worktree support)
-        cwd = Path.cwd().resolve()
+        cwd = self._ws_root(Path.cwd()).resolve()
         if cwd != project_root:
             cwd_candidate = (cwd / file_path).resolve()
             if cwd_candidate.exists():
@@ -3960,7 +3966,7 @@ class KogniDevServer:
     def _profile_project_sync(self) -> dict:
         """Quick filesystem fingerprint — no LLM, no graph required."""
         from pathlib import Path
-        cwd = Path.cwd()
+        cwd = self._ws_root(Path.cwd())
         lang_map = {".py": "Python", ".ts": "TypeScript", ".js": "JavaScript",
                     ".go": "Go", ".java": "Java", ".rs": "Rust"}
         framework_signals = {"package.json": "Node.js", "requirements.txt": "Python",
@@ -4343,7 +4349,8 @@ class KogniDevServer:
             # caller-supplied path). Normalize to an absolute real path defensively
             # (Sentinel: avoid any relative/symlink ambiguity in the latch dir).
             import os as _os  # CG-01: os is not module-scoped here — import locally
-            root = getattr(self, "_project_root", None) or _os.getcwd()
+            _ws = session_workspace_root()
+            root = _ws or getattr(self, "_project_root", None) or _os.getcwd()
             root = _os.path.realpath(str(root))
             latch = EuAiActLatch(root)
             state = latch.read_state()  # internally fail-closed, never raises
@@ -5213,10 +5220,21 @@ class KogniDevServer:
                 "tool_hints": [],
             })
 
+    @staticmethod
+    def _ws_root(fallback: "Path") -> "Path":
+        """CR-INFRA-02e: the bound session workspace root in HTTP mode, else *fallback*.
+
+        In HTTP mode an unbound call raises ``WorkspaceNotBound`` (fail closed);
+        in stdio mode this returns *fallback*, so behaviour is unchanged.
+        """
+        return session_workspace_root() or fallback
+
     def _project_root_from_graph_file(self, graph_file: "str | None") -> "Path":
         """Resolve project root from _graph_file, safely handling non-filesystem URIs.
 
         Resolution precedence (highest to lowest):
+        0. The bound session workspace root (CR-INFRA-02e, HTTP mode only;
+           above every other source, including ``GRAQLE_WORKTREE_ROOT``).
         1. ``GRAQLE_WORKTREE_ROOT`` env var (cr-016) — supports parallel
            git-worktree clones for multi-CR SDK development. When set to an
            absolute path, this overrides every other source so that
@@ -5233,6 +5251,10 @@ class KogniDevServer:
         fall through to env-var sources.
         """
         import os as _os
+        # 0. Session workspace root (HTTP mode); None in stdio mode.
+        _session_root = session_workspace_root()
+        if _session_root is not None:
+            return _session_root
         # 1. GRAQLE_WORKTREE_ROOT (cr-016) — highest priority for parallel
         #    worktree clone support. Resolved/validated below.
         worktree_root = _os.environ.get("GRAQLE_WORKTREE_ROOT", "")
@@ -6957,6 +6979,16 @@ class KogniDevServer:
     # ── 8. graq_learn (PRO) ──────────────────────────────────────────
 
     async def _handle_learn(self, args: dict[str, Any]) -> str:
+        # CR-INFRA-02 PR-b (AC3): the graph is shared read state across HTTP
+        # sessions; every learn write goes through one lock so concurrent
+        # sessions cannot lose each other's update. Uncontended on stdio.
+        lock = self.__dict__.get("_learn_write_lock")
+        if lock is None:
+            lock = self.__dict__.setdefault("_learn_write_lock", asyncio.Lock())
+        async with lock:
+            return await self._handle_learn_locked(args)
+
+    async def _handle_learn_locked(self, args: dict[str, Any]) -> str:
         mode = args.get("mode", "outcome")
 
         # v0.51.3 — structured JSON action routing (VS Code extension
@@ -8196,7 +8228,7 @@ class KogniDevServer:
         if self._gov is None:
             try:
                 from graqle.intelligence.governance.middleware import GovernanceMiddleware
-                self._gov = GovernanceMiddleware(Path("."))
+                self._gov = GovernanceMiddleware(self._ws_root(Path(".")))
             except Exception as exc:
                 logger.debug("Governance middleware unavailable: %s", exc)
         return self._gov
@@ -8212,7 +8244,7 @@ class KogniDevServer:
         from graqle.intelligence.gate import IntelligenceGate
 
         t0 = _time.monotonic()
-        gate = IntelligenceGate(Path("."))
+        gate = IntelligenceGate(self._ws_root(Path(".")))
         module_query = args.get("module", "")
         action = args.get("action", "context")
 
@@ -8327,13 +8359,13 @@ class KogniDevServer:
 
         if action == "sessions":
             from graqle.intelligence.governance.audit import AuditTrail
-            trail = AuditTrail(Path("."))
+            trail = AuditTrail(self._ws_root(Path(".")))
             sessions = trail.list_sessions(limit=args.get("limit", 10))
             return json.dumps({"sessions": sessions, "count": len(sessions)})
 
         if action == "trail" and session_id:
             from graqle.intelligence.governance.audit import AuditTrail
-            trail = AuditTrail(Path("."))
+            trail = AuditTrail(self._ws_root(Path(".")))
             session = trail.load_session(session_id)
             if session is None:
                 return json.dumps({"error": f"Session '{session_id}' not found."})
@@ -8341,7 +8373,7 @@ class KogniDevServer:
 
         if action == "score" and session_id:
             from graqle.intelligence.governance.audit import AuditTrail
-            trail = AuditTrail(Path("."))
+            trail = AuditTrail(self._ws_root(Path(".")))
             session = trail.load_session(session_id)
             if session is None:
                 return json.dumps({"error": f"Session '{session_id}' not found."})
@@ -9512,7 +9544,7 @@ class KogniDevServer:
                         "success": False,
                         "error": "absolute_path_rejected",
                     })
-                _fp = (Path(_graph_file).parent / file_path).resolve()
+                _fp = (self._ws_root(Path(_graph_file).parent) / file_path).resolve()
                 if _fp.parent.exists():
                     file_path = str(_fp)
                     logger.debug(" new file target — %s", file_path)
@@ -10354,7 +10386,7 @@ class KogniDevServer:
                 return False
 
             # Determine project root from graph file path
-            root = Path(getattr(graph, "_graph_path", ".")).parent
+            root = self._ws_root(Path(getattr(graph, "_graph_path", ".")).parent)
             if not root.exists():
                 root = Path(".").resolve()
 
@@ -10539,7 +10571,7 @@ class KogniDevServer:
 
             # Match the existing _project_root convention used elsewhere
             # in this module (see line ~3737, ~4825).
-            _project_root = (
+            _project_root = self._ws_root(
                 Path(self._graph_file).parent.resolve()
                 if getattr(self, "_graph_file", None)
                 else Path.cwd().resolve()
@@ -11982,7 +12014,10 @@ class KogniDevServer:
 
         # Derive working directory from graph file location
         graph_path = self._graph_file
-        if graph_path:
+        _session_root = session_workspace_root()
+        if _session_root is not None:
+            working_dir = _session_root
+        elif graph_path:
             working_dir = Path(graph_path).parent.resolve()
         else:
             logger.warning("No graph file loaded — using cwd as working directory")
@@ -12444,7 +12479,7 @@ class KogniDevServer:
         # Phase 2: background push to S3 (non-blocking, debounced)
         try:
             from graqle.core.kg_sync import schedule_push, _detect_project_name
-            _proj = _detect_project_name(_Path(self._graph_file).parent)
+            _proj = _detect_project_name(self._ws_root(_Path(self._graph_file).parent))
             schedule_push(self._graph_file, _proj)
         except Exception as _push_exc:
             logger.debug("KG background push skipped: %s", _push_exc)
@@ -13313,6 +13348,14 @@ class KogniDevServer:
         if method == "tools/call":
             tool_name = params.get("name", "")
             arguments = params.get("arguments", {})
+            try:
+                session_workspace_root()  # HTTP mode: an unbound call is rejected (CR-INFRA-02e)
+            except WorkspaceNotBound as exc:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {"content": [{"type": "text", "text": str(exc)}], "isError": True},
+                }
             try:
                 result_text = await self.handle_tool(tool_name, arguments)
                 return {

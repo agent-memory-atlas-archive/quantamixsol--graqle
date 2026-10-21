@@ -297,10 +297,20 @@ def test_manager_error_falls_through_safely(monkeypatch):
 def test_no_import_cycle_tier_gate_and_manager():
     """CR-LIC-03b MINOR: tier_gate lazy-imports manager to avoid a cycle. Importing
     both in either order must not deadlock or ImportError (guards the cycle boundary)."""
-    import importlib
+    # TEST-01: each order runs in a fresh interpreter. The previous in-process
+    # importlib.reload() rebound LicenseTier/LicenseError in the shared module and
+    # broke tests/test_licensing/test_manager.py when run later in the same session.
+    import subprocess
+    import sys
 
-    importlib.import_module("graqle.activation.tier_gate")
-    importlib.import_module("graqle.licensing.manager")
-    # Reverse order too.
-    importlib.reload(importlib.import_module("graqle.licensing.manager"))
-    importlib.reload(importlib.import_module("graqle.activation.tier_gate"))
+    for first, second in (
+        ("graqle.activation.tier_gate", "graqle.licensing.manager"),
+        ("graqle.licensing.manager", "graqle.activation.tier_gate"),
+    ):
+        result = subprocess.run(
+            [sys.executable, "-c", f"import {first}, {second}"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stderr

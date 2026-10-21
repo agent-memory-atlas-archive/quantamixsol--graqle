@@ -20,6 +20,7 @@ Design (consistent with ADR-245 + CR-LIC-03a/03b):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -57,6 +58,24 @@ _SCHEMA_VERSION = 1
 _ENFORCE_ENV = "GRAQLE_ENFORCE_CAPS"
 _FALSY = frozenset({"0", "false", "no", "off", ""})
 
+# CR-LIC-01 AC-3: user-level sibling record (relocatable ONLY under pytest).
+_MARKER_FILENAME = "reasoning_quota_marker.json"
+_USER_DIR_ENV = "GRAQLE_USER_DIR"
+
+
+def _under_pytest() -> bool:
+    from graqle.licensing.caps import under_pytest
+
+    return under_pytest()
+
+
+def _as_count(value: object) -> int:
+    """Tolerant int: a corrupt entry reads as 0 rather than raising (the marker covers it)."""
+    try:
+        return max(int(value or 0), 0)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return 0
+
 
 class ReasoningQuotaExceeded(Exception):
     """Raised when a FREE user exceeds the monthly reasoning quota."""
@@ -71,11 +90,14 @@ class ReasoningQuotaExceeded(Exception):
 
 
 def quota_enforcement_enabled() -> bool:
-    """True unless explicitly opted out (GRAQLE_ENFORCE_CAPS=falsy). Default ON."""
-    raw = os.environ.get(_ENFORCE_ENV)
-    if raw is None:
-        return True
-    return raw.strip().lower() not in _FALSY
+    """True unless a *permitted* opt-out applies. Default ON.
+
+    CR-LIC-01: ``GRAQLE_ENFORCE_CAPS=falsy`` is honoured only with a verified paid
+    licence or under pytest; otherwise it is ignored (shared helper in ``caps``).
+    """
+    from graqle.licensing.caps import caps_enforced
+
+    return caps_enforced()
 
 
 def _paid_tier() -> bool:
@@ -163,6 +185,76 @@ class ReasoningQuota:
     def _month() -> str:
         return datetime.now(timezone.utc).strftime("%Y-%m")
 
+    # -- tamper evidence (CR-LIC-01 AC-3) -----------------------------------
+    # A sibling record in the user-level ``~/.graqle`` dir, keyed by project, so that
+    # deleting or corrupting the project-local file is not a counter reset: the count
+    # resumes from the higher of the two. Local and simple; deliberate local
+    # edits of both files are still accepted. If the user dir is unavailable the project
+    # file alone counts - enforcement is never relaxed by a marker fault.
+
+    def _marker_path(self) -> Path | None:
+        try:
+            override = os.environ.get(_USER_DIR_ENV)
+            if override and override.strip() and _under_pytest():
+                base = Path(override)
+            else:
+                base = Path.home() / ".graqle"
+            return base / _MARKER_FILENAME
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _project_key(self) -> str:
+        resolved = str(self._path.parent.resolve())
+        return hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:16]
+
+    def _marker_read(self) -> dict:
+        path = self._marker_path()
+        try:
+            if path is not None and path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
+        except Exception:  # noqa: BLE001
+            logger.debug("reasoning quota marker unreadable")
+        return {}
+
+    def _marker_used(self, month: str) -> int:
+        try:
+            project = self._marker_read().get(self._project_key())
+            return _as_count(project.get(month)) if isinstance(project, dict) else 0
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def _marker_store(self, month: str, used: int) -> None:
+        path = self._marker_path()
+        if path is None:
+            return
+        try:
+            data = self._marker_read()
+            key = self._project_key()
+            project = data.get(key)
+            project = dict(project) if isinstance(project, dict) else {}
+            project[month] = max(used, _as_count(project.get(month)))
+            data[key] = _prune_old_months(project, month)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump(data, fh)
+                os.replace(tmp_name, path)
+            except Exception:
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
+                raise
+        except Exception:  # noqa: BLE001 - marker is best-effort; project file still counts
+            logger.debug("could not persist reasoning quota marker")
+
+    def _used(self, month: str) -> int:
+        """Higher of the project-local count and the user-level marker."""
+        return max(_as_count(self._load().get(month)), self._marker_used(month))
+
     def peek(self) -> QuotaReading:
         """Current usage without recording. Paid (or enforcement off) → allowed.
 
@@ -176,7 +268,7 @@ class ReasoningQuota:
         month = self._month()
         if _paid_tier() or not quota_enforcement_enabled():
             return QuotaReading(used=0, limit=-1, month=month, allowed=True)
-        used = int(self._load().get(month, 0) or 0)
+        used = self._used(month)
         return QuotaReading(
             used=used,
             limit=FREE_REASONS_PER_MONTH,
@@ -247,12 +339,13 @@ class ReasoningQuota:
             # one extra free call per racing process.
             with self._locked():
                 data = self._load()
-                used = int(data.get(month, 0) or 0)
+                used = max(_as_count(data.get(month)), self._marker_used(month))
                 if used >= FREE_REASONS_PER_MONTH:
                     raise ReasoningQuotaExceeded(used, FREE_REASONS_PER_MONTH, month)
                 data[month] = used + 1
                 data["schema_version"] = _SCHEMA_VERSION
                 self._store(_prune_old_months(data, month))
+                self._marker_store(month, used + 1)
             return QuotaReading(
                 used=used + 1,
                 limit=FREE_REASONS_PER_MONTH,

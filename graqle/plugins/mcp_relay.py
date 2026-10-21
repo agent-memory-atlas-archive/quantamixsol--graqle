@@ -1,0 +1,233 @@
+"""Thin stdio relay to a shared GraQle MCP HTTP server (CR-INFRA-02 PR-c).
+
+``graq mcp relay --url http://127.0.0.1:N`` is a stdio MCP process that holds
+no graph and imports no ML code: each JSON-RPC line read from stdin is POSTed
+to the shared server (``mcp_http_transport``) and the reply is written to
+stdout, so an existing ``.mcp.json`` only changes its command.
+
+Fail closed: if the server is unreachable, rejects the request or answers
+with something that is not JSON-RPC, the client gets an explicit error. The
+relay never falls back to loading a graph locally (it cannot: it does not
+import the server).
+
+Standard library only, on purpose (RSS).
+"""
+
+from __future__ import annotations
+
+import ipaddress
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any, TextIO
+from urllib.parse import quote, urlparse
+
+DEFAULT_TOKEN_ENV = "GRAQLE_MCP_HTTP_TOKEN"
+WORKSPACE_HEADER = "X-Graqle-Workspace-Root"
+SESSION_HEADER = "Mcp-Session-Id"
+PROJECT_HEADER = "X-Graqle-Project"
+ERR_UNREACHABLE = -32003
+ERR_BAD_REPLY = -32004
+TIMEOUT_S = 120
+
+
+class RelayConfigError(RuntimeError):
+    """Raised when the relay is configured unsafely or incorrectly."""
+
+
+def _is_loopback(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def normalise_url(url: str) -> str:
+    """Return the MCP endpoint URL for *url* (appends ``/mcp`` if no path)."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise RelayConfigError(f"--url must be an http(s) URL, got {url!r}")
+    path = parsed.path.rstrip("/")
+    return parsed._replace(path=path or "/mcp").geturl()
+
+
+def _error_reply(message: dict[str, Any], code: int, text: str) -> dict[str, Any]:
+    """A reply the client can show: tool error for tools/call, else JSON-RPC error."""
+    if message.get("method") == "tools/call":
+        return {
+            "jsonrpc": "2.0",
+            "id": message.get("id"),
+            "result": {"content": [{"type": "text", "text": text}], "isError": True},
+        }
+    return {"jsonrpc": "2.0", "id": message.get("id"), "error": {"code": code, "message": text}}
+
+
+class Relay:
+    """Forwards JSON-RPC messages to one shared server, tracking its session id."""
+
+    def __init__(
+        self,
+        url: str,
+        token: str | None = None,
+        project: str | None = None,
+        workspace_root: str | None = None,
+    ) -> None:
+        self.url = normalise_url(url)
+        self._project = project
+        # CR-INFRA-02e: the server binds this root once at initialize (header,
+        # percent-encoded); default is the relay's own cwd.
+        root = Path(workspace_root or os.getcwd()).resolve()
+        if not root.is_dir():
+            raise RelayConfigError(f"--workspace-root is not a directory: {root}")
+        self._workspace_root = quote(str(root), safe="/:")
+        parsed = urlparse(self.url)
+        if token is not None and parsed.scheme != "https" and not _is_loopback(parsed.hostname or ""):
+            raise RelayConfigError("refusing to send the auth token over plain http to a non-loopback host")
+        self._token = token
+        self._session_id: str | None = None
+        self.local_root = root  # the user's own workspace root (local tools run here)
+
+    def post_side(self, kind: str, body: dict[str, Any], timeout: float) -> dict[str, Any]:
+        """POST to the hub's ``/relay/<kind>`` side channel (CR-INFRA-02f).
+
+        Raises ``HubUnavailable`` on any problem: unreachable, timeout, non-200,
+        non-JSON or oversize reply. Nothing is retried, cached or queued.
+        """
+        from graqle.plugins.mcp_relay_hybrid import SNAPSHOT_MAX_BYTES, HubUnavailable
+
+        if self._session_id is None:
+            raise HubUnavailable("no hub session yet")
+        parsed = urlparse(self.url)
+        base = parsed.path.rsplit("/", 1)[0]
+        url = parsed._replace(path=f"{base}/relay/{kind}").geturl()
+        headers = {"Content-Type": "application/json", "Accept": "application/json", SESSION_HEADER: self._session_id}
+        if self._token is not None:
+            headers["Authorization"] = f"Bearer {self._token}"
+        req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (scheme validated)
+                raw = resp.read(SNAPSHOT_MAX_BYTES + 1)
+                status = resp.status
+        except urllib.error.HTTPError as exc:
+            try:  # a 4xx carrying a verdict is still a verdict (a refusal)
+                answer = json.loads(exc.read(SNAPSHOT_MAX_BYTES))
+                if isinstance(answer, dict) and answer.get("allow") is False:
+                    return answer
+            except Exception:  # noqa: BLE001 - falls through to unavailable
+                pass
+            raise HubUnavailable(f"HTTP {exc.code}") from exc
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            raise HubUnavailable(type(exc).__name__) from exc
+        if status != 200 or len(raw) > SNAPSHOT_MAX_BYTES:
+            raise HubUnavailable("bad status or oversize reply")
+        try:
+            answer = json.loads(raw)
+        except ValueError as exc:
+            raise HubUnavailable("non-JSON reply") from exc
+        if not isinstance(answer, dict):
+            raise HubUnavailable("invalid reply")
+        return answer
+
+    def forward(self, message: dict[str, Any]) -> dict[str, Any] | None:
+        """POST *message*; return the reply, or None for a notification (202)."""
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if self._token is not None:
+            headers["Authorization"] = f"Bearer {self._token}"
+        if self._project is not None:
+            headers[PROJECT_HEADER] = self._project
+        headers[WORKSPACE_HEADER] = self._workspace_root
+        if self._session_id is not None:
+            headers[SESSION_HEADER] = self._session_id
+        req = urllib.request.Request(
+            self.url, data=json.dumps(message).encode("utf-8"), headers=headers, method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:  # noqa: S310 (scheme validated)
+                sid = resp.headers.get(SESSION_HEADER)
+                if message.get("method") == "initialize" and sid:
+                    self._session_id = sid
+                body = resp.read()
+                status = resp.status
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = json.loads(exc.read()).get("error", {}).get("message", "")
+            except Exception:  # noqa: BLE001 - detail is best effort; the error is reported anyway
+                pass
+            return _error_reply(
+                message, ERR_UNREACHABLE,
+                f"GraQle shared server at {self.url} rejected the request (HTTP {exc.code}{': ' + detail if detail else ''})",
+            )
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            return _error_reply(
+                message, ERR_UNREACHABLE,
+                f"GraQle shared server at {self.url} is unreachable ({type(exc).__name__}); "
+                "start it with `graq mcp serve --transport http`. No local graph was loaded.",
+            )
+        if status == 202 or not body:
+            return None
+        try:
+            reply = json.loads(body)
+        except ValueError:
+            return _error_reply(message, ERR_BAD_REPLY, "GraQle shared server returned a non-JSON reply")
+        if not isinstance(reply, dict):
+            return _error_reply(message, ERR_BAD_REPLY, "GraQle shared server returned an invalid reply")
+        return reply
+
+
+def run_relay(
+    url: str,
+    token_env: str = DEFAULT_TOKEN_ENV,
+    stdin: TextIO | None = None,
+    stdout: TextIO | None = None,
+    project: str | None = None,
+    workspace_root: str | None = None,
+    local_tools: bool | None = None,
+) -> None:
+    """Relay newline-delimited JSON-RPC from stdin to the server until EOF.
+
+    *local_tools* (CR-INFRA-02f): ``None`` = on when the server is not on this
+    machine's loopback; ``False`` = every call is forwarded (previous behaviour).
+    """
+    stdin = stdin or sys.stdin
+    stdout = stdout or sys.stdout
+    relay = Relay(url, os.environ.get(token_env, "").strip() or None, project, workspace_root)
+    if local_tools is None:
+        local_tools = not _is_loopback(urlparse(relay.url).hostname or "")
+    dispatcher = None
+    if local_tools:
+        from graqle.plugins.mcp_relay_hybrid import HybridDispatcher
+
+        dispatcher = HybridDispatcher(relay.local_root, relay.forward, relay.post_side)
+    for line in stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            message = json.loads(line)
+        except ValueError:
+            reply: dict[str, Any] | None = {
+                "jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"},
+            }
+        else:
+            if not isinstance(message, dict):
+                reply = {
+                    "jsonrpc": "2.0", "id": None,
+                    "error": {"code": -32600, "message": "Invalid Request: expected a single JSON object"},
+                }
+            else:
+                if dispatcher is not None and message.get("method") == "tools/call":
+                    reply = dispatcher.handle(message)
+                else:
+                    reply = relay.forward(message)
+                if reply is not None and "id" not in message:
+                    print(f"graq mcp relay: dropped error for notification: {reply}", file=sys.stderr)
+                    reply = None
+        if reply is not None:
+            stdout.write(json.dumps(reply) + "\n")
+            stdout.flush()

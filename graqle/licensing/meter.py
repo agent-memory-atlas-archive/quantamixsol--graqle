@@ -80,12 +80,12 @@ class NodeCapExceeded(Exception):
 def enforcement_enabled() -> bool:
     """True unless explicitly opted out via GRACE_ENV=falsy. Default: ON.
 
-    ADR-245: enforcement is on by default; the env var only DISABLES it (for CI).
+    ADR-245: enforcement is on by default. CR-LIC-01: the opt-out is honoured only
+    with a verified paid licence or under pytest (see :mod:`graqle.licensing.caps`).
     """
-    raw = os.environ.get(ENFORCE_ENV)
-    if raw is None:
-        return True  # default ON
-    return raw.strip().lower() not in _FALSY
+    from graqle.licensing.caps import caps_enforced
+
+    return caps_enforced()
 
 
 def _grace_days() -> int:
