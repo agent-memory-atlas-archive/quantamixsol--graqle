@@ -8,6 +8,8 @@ collect_ignore = [
     "test_ontology/test_ontology_generator.py",
 ]
 
+# TEST-01: tracked known-failures list (tests/known_failures.json).
+from tests._known_failures import pytest_collection_modifyitems  # noqa: E402,F401
 
 """Shared test fixtures for GraQle."""
 
