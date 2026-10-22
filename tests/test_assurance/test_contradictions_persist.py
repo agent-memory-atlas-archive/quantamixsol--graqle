@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 
@@ -133,8 +134,9 @@ def test_ac16_determinism_record_and_no_threshold_values():
             assert d[field], field
         assert ev.event_id == "pev_" + ev.idempotency_key[:26]
         blob = json.dumps(d)
-        assert "7331" not in blob
-        assert not any(str(v) in blob for v in SUBST_PRIORITY.values())
+        # whole-token match: a bare substring test collides with digits inside hex hashes
+        assert not re.search(r"(?<![0-9A-Za-z])7331(?![0-9A-Za-z])", blob)
+        assert not any(re.search(rf"(?<![0-9A-Za-z]){v}(?![0-9A-Za-z])", blob) for v in SUBST_PRIORITY.values())
 
 
 def test_config_rejects_zero_and_non_integer_corroboration_minimum():

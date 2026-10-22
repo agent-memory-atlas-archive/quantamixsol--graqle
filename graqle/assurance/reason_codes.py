@@ -321,6 +321,13 @@ _SEED: tuple[ReasonCode, ...] = (
         "Recomputation attempts exhausted; node INVALIDATED.",
         "0.86.0",
     ),
+    ReasonCode(
+        "DAG-PV-RECOMPUTED",
+        Severity.INFO,
+        "PV",
+        "Node was recomputed from its current support and is ACTIVE again.",
+        "0.86.0",
+    ),
     # Replan (CR-015)
     ReasonCode(
         "DAG-RP-RETRY_BUDGET_EXHAUSTED",

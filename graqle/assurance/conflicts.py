@@ -87,6 +87,8 @@ __all__ = [
     "authority",
     "independent_support_count",
     "accept_correction",
+    "system_event",
+    "recompute_tasks",
     "resolve",
     "handle_supersedes",
     "handle_corrects",
@@ -287,6 +289,9 @@ class MutationReceipt(BaseModel):
 
     mutation_id: str
     replayed: bool = False
+    nodes_written: int = 0
+    edges_written: int = 0
+    tasks_written: int = 0
 
 
 @dataclass(frozen=True)
@@ -410,6 +415,71 @@ class ResolutionEvent(ProvenanceEvent):
             rule_id="CR017.detect",
             now=now or rec.detected_at,
         )
+
+
+def system_event(
+    event_type: Literal["INVALIDATION", "RECOMPUTATION"],
+    seed: Mapping[str, Any],
+    *,
+    actor: str,
+    code: str,
+    text: str,
+    decisive: Sequence[str],
+    cfg: ConflictConfig,
+    rule_id: str,
+    extra: Mapping[str, Any] | None = None,
+    now: str | None = None,
+) -> ResolutionEvent:
+    """Event for a system act on one node (invalidation, recomputation); no contradiction involved.
+
+    The idempotency key covers the seed's ``assurance_seq``: replaying the act against an
+    unchanged node MERGEs onto the same event, while a later act on a changed node is new.
+    """
+    if not reason_codes.REGISTRY.get(code):
+        raise ConflictError(f"unregistered rationale code {code!r}")
+    seed_id = str(seed["id"])
+    stamp = now or _now_iso()
+    scope = str(seed.get("scope_key") or GLOBAL_SCOPE_KEY)
+    key = {"type": event_type, "seed": seed_id, "seq": _seq(seed), "code": code, "extra": dict(extra or {})}
+    idem = _sha(key)
+    event_id = "pev_" + idem[:_EVENT_HEX]
+    authority_record = _canon_json({"actor": actor, "rule": rule_id})
+    inputs_hash = _sha({**key, "rule_id": rule_id, "rule_version": RULE_VERSION, "config_version": cfg.config_version})
+    body: dict[str, Any] = {
+        "id": event_id,
+        "assurance_type": AssuranceClass.PROVENANCE_EVENT.value,
+        "event_id": event_id,
+        "event_type": event_type,
+        "actor": actor,
+        "inputs": [seed_id],
+        "outputs": [seed_id],
+        "rationale_code": code,
+        "rationale_text": text,
+        "authority_record": authority_record,
+        "inputs_hash": inputs_hash,
+        "rule_id": rule_id,
+        "rule_version": RULE_VERSION,
+        "config_version": cfg.config_version,
+        "decisive_conditions": list(decisive),
+        "idempotency_key": idem,
+        "valid_from": stamp,
+        "asserted_at": stamp,
+        "timestamp": stamp,
+        "scope_key": scope,
+        "lifecycle_status": LifecycleStatus.ACTIVE.value,
+        "schema_version": "1",
+    }
+    body["canonical_hash"] = _sha(body)
+    return ResolutionEvent(**body)
+
+
+def recompute_tasks(marked: Sequence[Mark], frontier: Sequence[str], ev: ResolutionEvent) -> list[RecomputeTask]:
+    """One task per dirty node. A frontier node is also marked, and DEPTH_CAP wins: its
+    dependents are still unexplored, so the task must continue the propagation."""
+    capped = set(frontier)
+    tasks = [RecomputeTask.for_node(m.node_id, reason=m.via, ev=ev) for m in marked if m.node_id not in capped]
+    tasks += [RecomputeTask.for_node(f, reason="DEPTH_CAP", ev=ev) for f in dict.fromkeys(frontier)]
+    return tasks
 
 
 class AssuranceMutation(BaseModel):
@@ -835,6 +905,11 @@ def handle_corrects(
         now=now,
     )
     marked, frontier = propagator(str(old["id"]), ev, "SOFT")
+    # ``new`` and ``old`` carry their own explicit writes; a second write to the same
+    # node in one mutation would fail the sequence check against itself.
+    explicit = {str(new["id"]), str(old["id"])}
+    marked = [m for m in marked if m.node_id not in explicit]
+    frontier = [f for f in frontier if f not in explicit]
     nodes = [
         NodeWrite(
             node_id=str(old["id"]),
@@ -848,8 +923,7 @@ def handle_corrects(
         ),
         *[m.node_write() for m in marked],
     ]
-    tasks = [RecomputeTask.for_node(m.node_id, reason=m.via, ev=ev) for m in marked]
-    tasks += [RecomputeTask.for_node(f, reason="DEPTH_CAP", ev=ev) for f in frontier]
+    tasks = recompute_tasks(marked, frontier, ev)
     edges = [
         EdgeWrite(
             edge_id=edge_id(str(new["id"]), str(old["id"]), EdgeKind.CORRECTS, rec.scope_key),

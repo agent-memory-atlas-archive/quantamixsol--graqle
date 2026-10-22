@@ -34,7 +34,7 @@ Design notes:
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from graqle.governance.tamper_evidence.errors import TamperEvidenceError
@@ -67,6 +67,24 @@ class AssuranceWriteRefusedError(KgPersistError):
     Distinct from a transient :class:`KgPersistError` so a caller never retries
     a write that would corrupt the assurance graph.
     """
+
+
+class WriteCollisionError(KgPersistError):
+    """A planned node's ``assurance_seq`` changed between planning and commit (CR-017).
+
+    Names the first conflicting node. The whole mutation was rolled back: nothing was
+    written. ``code`` is the registered reason code for the verdict layer.
+    """
+
+    code = "DAG-PV-WRITE-COLLISION"
+
+    def __init__(self, node_id: str, expected: int, actual: int) -> None:
+        super().__init__(
+            f"write collision on {node_id!r}: expected assurance_seq {expected}, found {actual}; mutation aborted"
+        )
+        self.node_id = node_id
+        self.expected = expected
+        self.actual = actual
 
 
 def _is_constraint_rejection(exc: BaseException) -> bool:
@@ -145,7 +163,10 @@ class Neo4jBatchPersister:
         connector: "Neo4jConnector",
         ensure_schema: bool = True,
         integrity_keyring: IntegrityKeyring | None = None,
+        write_collision_retries: int | None = None,
     ) -> None:
+        # No default: the retry count is a protected tuning value (CR-017 PR-017b).
+        self._write_collision_retries = write_collision_retries
         self._connector = connector
         self._ensure_schema = ensure_schema
         self._schema_ready = False
@@ -190,6 +211,45 @@ class Neo4jBatchPersister:
                 ) from exc
             logger.error("assurance write failed (%d ops)", len(ops), exc_info=True)
             raise KgPersistError(f"failed to persist {len(ops)} assurance op(s): {exc}") from exc
+
+    def persist_assurance_mutation(
+        self,
+        m: Any,
+        replanner: Callable[[Any], Any | None] | None = None,
+    ) -> Any:
+        """Commit one mutation atomically (CR-017 section 5.5).
+
+        ``m`` is a ``graqle.assurance.conflicts.AssuranceMutation`` and the result a
+        ``MutationReceipt``; both are typed ``Any`` because governance never imports the
+        assurance layer (import direction, CR-012 N5).
+
+        On :class:`WriteCollisionError` the optional ``replanner`` re-reads the sequences and
+        re-derives the mutation; it returns ``None`` to give up. Without a replanner, or when
+        the retry budget is spent, the collision is raised and nothing was committed. Any
+        other failure is wrapped in :class:`KgPersistError`; there is no silent success.
+        """
+        retries = self._write_collision_retries
+        if isinstance(retries, bool) or not isinstance(retries, int) or retries < 1:
+            raise KgPersistError("persist_assurance_mutation needs write_collision_retries >= 1; nothing written")
+        last: WriteCollisionError | None = None
+        for attempt in range(1, retries + 1):
+            try:
+                return self._connector.persist_assurance_mutation(m)
+            except WriteCollisionError as exc:
+                last = exc
+                logger.warning("write collision on %s (attempt %d): %s", exc.node_id, attempt, exc)
+                if replanner is None or attempt == retries:
+                    raise
+                replanned = replanner(m)
+                if replanned is None:
+                    raise
+                m = replanned
+            except KgPersistError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - wrap-and-propagate by design
+                logger.error("assurance mutation %s failed", m.mutation_id, exc_info=True)
+                raise KgPersistError(f"failed to persist assurance mutation {m.mutation_id}: {exc}") from exc
+        raise last if last is not None else KgPersistError("no attempt was made")  # pragma: no cover
 
     def _ensure_assurance_constraints(self) -> None:
         """M2: fail closed if the DB constraints rules (a) and (b) rely on are absent.

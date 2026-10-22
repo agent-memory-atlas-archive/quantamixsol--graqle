@@ -17,6 +17,9 @@ import logging
 import os
 import re
 from collections import defaultdict
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
@@ -785,6 +788,204 @@ class Neo4jConnector(BaseConnector):
             "Persisted :CommittedBatch %s (quarter=%s, %d record link(s))",
             batch_id, props["batch_quarter"], len(hashes),
         )
+
+    # --- CR-017 PR-017b: assurance mutations, read sessions, recompute queue ---
+
+    @contextmanager
+    def read_session(self) -> Iterator[Any]:
+        """A read-only session for planning passes (propagation never writes)."""
+        driver = self._get_driver()
+        with driver.session(database=self._database, default_access_mode="READ") as session:
+            yield session
+
+    @staticmethod
+    def _assurance_props(raw: dict[str, Any]) -> dict[str, Any]:
+        """Flatten a model dump to Neo4j property types: drop None, JSON-encode nested maps."""
+        import json
+
+        out: dict[str, Any] = {}
+        for key, value in raw.items():
+            if value is None:
+                continue
+            out[key] = json.dumps(value, sort_keys=True) if isinstance(value, dict) else value
+        return out
+
+    def create_recompute_schema(self) -> None:
+        """Idempotently create the ``:RecomputeTask`` uniqueness constraint (additive)."""
+        driver = self._get_driver()
+        with driver.session(database=self._database) as session:
+            session.run(
+                "CREATE CONSTRAINT recompute_task_id IF NOT EXISTS "
+                "FOR (t:RecomputeTask) REQUIRE t.task_id IS UNIQUE"
+            )
+
+    def backfill_assurance_seq(self, batch_size: int) -> int:
+        """Give every CogniNode without one ``assurance_seq = 0``; returns the nodes written.
+
+        Optional: readers treat an absent sequence as 0, so the mutation path does not need
+        this. It is never called implicitly. Runs in batches of ``batch_size``.
+        """
+        if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 1:
+            raise ValueError("batch_size must be a positive integer")
+        driver = self._get_driver()
+        total = 0
+        with driver.session(database=self._database) as session:
+            while True:
+                rec = session.run(
+                    "MATCH (n:CogniNode) WHERE n.assurance_seq IS NULL "
+                    "WITH n LIMIT $batch SET n.assurance_seq = 0 RETURN count(n) AS c",
+                    batch=batch_size,
+                ).single()
+                written = int(rec["c"]) if rec else 0
+                if written == 0:
+                    return total
+                total += written
+
+    def persist_assurance_mutation(self, m: Any) -> dict[str, Any]:
+        """Commit one ``AssuranceMutation`` in a single write transaction (CR-017 section 5.5).
+
+        ``m`` is duck-typed (this module never imports the assurance layer). Properties:
+
+        * The event is written once. If it already exists the call is an idempotent replay
+          and writes nothing else.
+        * Every planned node is locked, then its ``assurance_seq`` is compared with the
+          planned value. Any difference raises ``WriteCollisionError`` inside the
+          transaction, so the event, nodes, edges and tasks are all rolled back.
+        * Edges and tasks must find their endpoints; a missing endpoint raises and rolls back.
+        """
+        from graqle.governance.tamper_evidence.kg_persist import (  # lazy
+            KgPersistError,
+            WriteCollisionError,
+        )
+
+        node_rows = [{"node_id": w.node_id, "expected_seq": w.expected_seq, "set_props": dict(w.set_props)} for w in m.node_writes]
+        ids = [r["node_id"] for r in node_rows]
+        if len(set(ids)) != len(ids):
+            raise KgPersistError("a mutation may write each node at most once")
+        node_rows.sort(key=lambda r: r["node_id"])  # stable lock order across concurrent writers
+        edge_rows = [e.model_dump() for e in m.edge_writes]
+        task_rows = [{"task_id": t.task_id, "node_id": t.node_id, "props": t.model_dump()} for t in m.tasks]
+        event_id = m.event.event_id
+        event_props = self._assurance_props(m.event.model_dump(mode="json"))
+
+        def _write(tx: Any) -> dict[str, Any]:
+            rec = tx.run(
+                "MERGE (e:CogniNode {id: $id}) ON CREATE SET e += $props, e.created_in_tx = true "
+                "WITH e, (e.created_in_tx IS NOT NULL) AS fresh REMOVE e.created_in_tx RETURN fresh",
+                id=event_id,
+                props=event_props,
+            ).single()
+            if rec is None:
+                raise KgPersistError(f"event {event_id} could not be written")
+            if not rec["fresh"]:
+                return {"mutation_id": m.mutation_id, "replayed": True}
+            written = 0
+            if node_rows:
+                # Take the write locks first so the sequence comparison below reads committed state.
+                tx.run(
+                    "UNWIND $ids AS nid MATCH (n:CogniNode {id: nid}) SET n.assurance_seq = coalesce(n.assurance_seq, 0)",
+                    ids=[r["node_id"] for r in node_rows],
+                ).consume()
+                # Compare BEFORE writing so the error names the first genuinely stale node.
+                found = {
+                    r["id"]: r["act"]
+                    for r in tx.run(
+                        "UNWIND $ids AS nid MATCH (n:CogniNode {id: nid}) "
+                        "RETURN n.id AS id, coalesce(n.assurance_seq, 0) AS act",
+                        ids=[r["node_id"] for r in node_rows],
+                    )
+                }
+                for row in node_rows:
+                    if row["node_id"] not in found:
+                        raise KgPersistError(f"planned node {row['node_id']!r} does not exist")
+                    if found[row["node_id"]] != row["expected_seq"]:
+                        raise WriteCollisionError(row["node_id"], row["expected_seq"], found[row["node_id"]])
+                res = tx.run(
+                    "UNWIND $rows AS row MATCH (n:CogniNode {id: row.node_id}) "
+                    "WHERE coalesce(n.assurance_seq, 0) = row.expected_seq "
+                    "SET n += row.set_props, n.assurance_seq = coalesce(n.assurance_seq, 0) + 1 "
+                    "RETURN count(n) AS written",
+                    rows=node_rows,
+                ).single()
+                written = int(res["written"]) if res else 0
+                if written != len(node_rows):  # the locks make this unreachable unless the DB misbehaves
+                    raise KgPersistError("node write count mismatch; mutation aborted")
+            edges = 0
+            if edge_rows:
+                res = tx.run(
+                    "UNWIND $rows AS row MATCH (a:CogniNode {id: row.source_id}), (b:CogniNode {id: row.target_id}) "
+                    "MERGE (a)-[r:RELATES_TO {id: row.edge_id}]->(b) SET r.kind = row.kind, r += row.props "
+                    "RETURN count(r) AS n",
+                    rows=edge_rows,
+                ).single()
+                edges = int(res["n"]) if res else 0
+                if edges != len(edge_rows):
+                    raise KgPersistError("an edge endpoint does not exist; mutation aborted")
+            tasks = 0
+            if task_rows:
+                res = tx.run(
+                    "UNWIND $rows AS row MATCH (n:CogniNode {id: row.node_id}) "
+                    "MERGE (t:RecomputeTask {task_id: row.task_id}) ON CREATE SET t += row.props "
+                    "MERGE (t)-[u:RELATES_TO {id: 'e_' + row.task_id}]->(n) SET u.kind = 'USED' "
+                    "RETURN count(t) AS n",
+                    rows=task_rows,
+                ).single()
+                tasks = int(res["n"]) if res else 0
+                if tasks != len(task_rows):
+                    raise KgPersistError("a recompute task target does not exist; mutation aborted")
+            return {
+                "mutation_id": m.mutation_id,
+                "replayed": False,
+                "nodes_written": written,
+                "edges_written": edges,
+                "tasks_written": tasks,
+            }
+
+        driver = self._get_driver()
+        with driver.session(database=self._database) as session:
+            return session.execute_write(_write)
+
+    def claim_recompute_tasks(self, batch_size: int) -> list[dict[str, Any]]:
+        """Move up to ``batch_size`` QUEUED tasks to RUNNING in one transaction; returns them.
+
+        The claim writes a token first (taking the node lock) and re-checks the state
+        afterwards, so two workers never receive the same task.
+        """
+        if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 1:
+            raise ValueError("batch_size must be a positive integer")
+
+        def _claim(tx: Any) -> list[dict[str, Any]]:
+            rows = tx.run(
+                "MATCH (t:RecomputeTask) WHERE t.state = 'QUEUED' "
+                "WITH t ORDER BY t.enqueued_at, t.task_id LIMIT $n "
+                "SET t.claim_token = $token "
+                "WITH t WHERE t.state = 'QUEUED' "
+                "SET t.state = 'RUNNING' "
+                "RETURN properties(t) AS props",
+                n=batch_size,
+                token=hashlib.sha256(os.urandom(16)).hexdigest()[:16],
+            )
+            return [dict(r["props"]) for r in rows]
+
+        driver = self._get_driver()
+        with driver.session(database=self._database) as session:
+            return session.execute_write(_claim)
+
+    def set_recompute_task_state(self, task_id: str, state: str, attempts: int, error: str | None = None) -> None:
+        """Set a task's state and attempt count; raises if the task does not exist."""
+        driver = self._get_driver()
+        with driver.session(database=self._database) as session:
+            rec = session.run(
+                "MATCH (t:RecomputeTask {task_id: $id}) "
+                "SET t.state = $state, t.attempts = $attempts, t.last_error = $error "
+                "RETURN count(t) AS n",
+                id=task_id,
+                state=state,
+                attempts=attempts,
+                error=error,
+            ).single()
+        if rec is None or int(rec["n"]) != 1:
+            raise ValueError(f"recompute task {task_id!r} not found")
 
     def count_uncommitted_records(self) -> int:
         """Count governed-trace records not yet linked to any ``:CommittedBatch``.
