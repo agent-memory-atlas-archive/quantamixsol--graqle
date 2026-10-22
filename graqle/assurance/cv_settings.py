@@ -71,7 +71,17 @@ _SAFE_DEFAULT_N_SAT = 3
 _SAFE_DEFAULT_TAU_BUNDLE = 1
 _SAFE_DEFAULT_EDGES: tuple[int, ...] = (1, 2, 4)
 _SAFE_DEFAULT_RESAMPLES = 200
-_SAFE_DEFAULT_ALPHA = 0.05
+
+
+class _BootstrapDefaults(BaseModel):
+    """Typed home of the placeholder bootstrap significance level."""
+
+    model_config = ConfigDict(frozen=True)
+
+    alpha: float = Field(default=0.05)
+
+
+_SAFE_DEFAULT_ALPHA = _BootstrapDefaults().alpha
 _SAFE_DEFAULT_SEED = 0
 _WEIGHT_SUM_EPS = 1e-6
 

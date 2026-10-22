@@ -68,7 +68,17 @@ REPORT_SCHEMA = "e2-report-1"
 #: Public report bands: equal-width tenths of [0, 1]. Not policy thresholds.
 _N_REPORT_BANDS = 10
 #: Reporting-method constants (recorded in the report), not policy values.
-DEFAULT_MIN_ROWS_PER_CLASS = 100
+
+
+class _StudyDefaults(BaseModel):
+    """Typed home of the reporting-method minimum rows per entity class."""
+
+    model_config = ConfigDict(frozen=True)
+
+    min_rows_per_class: int = Field(default=100)
+
+
+DEFAULT_MIN_ROWS_PER_CLASS = _StudyDefaults().min_rows_per_class
 _MIN_BAND_ROWS = 30
 _MATERIAL_BAND_GAP = 0.10
 

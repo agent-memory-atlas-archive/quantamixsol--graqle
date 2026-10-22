@@ -600,7 +600,7 @@ def test_config_loader_resolves_private_refs(dag_env: pytest.MonkeyPatch) -> Non
     cfg = load_assurance_ontology_config()
     assert cfg.scope_key_fields == ("f_alpha", "f_beta")
     assert cfg.merge_priority is None
-    assert "f_alpha" not in repr(cfg)  # TS-4 values never in a repr
+    assert "f_alpha" not in repr(cfg)  # private values never in a repr
 
 
 def test_config_loader_unresolvable_ref_names_the_ref_only(dag_env: pytest.MonkeyPatch) -> None:

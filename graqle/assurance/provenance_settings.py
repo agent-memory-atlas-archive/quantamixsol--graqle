@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 from typing import Literal
 
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from graqle.config.exceptions import ENV_FLAG, ConfigurationError
@@ -33,10 +33,24 @@ __all__ = [
 ]
 
 # Operational safe defaults (symbolic names; the loader rejects zero).
-K_MAX_AGE_DEFAULT = 90
-K_OVERLAP_DEFAULT = 7
-R_SEQ_RETRY_DEFAULT = 5
-SKEW_DEFAULT = 5
+
+
+class _OperationalDefaults(BaseModel):
+    """Typed home of the operational safe defaults."""
+
+    model_config = ConfigDict(frozen=True)
+
+    key_max_age_days: int = Field(default=90)
+    key_overlap_days: int = Field(default=7)
+    seq_retry_budget: int = Field(default=5)
+    clock_skew_tolerance_s: int = Field(default=5)
+
+
+_DEFAULTS = _OperationalDefaults()
+K_MAX_AGE_DEFAULT = _DEFAULTS.key_max_age_days
+K_OVERLAP_DEFAULT = _DEFAULTS.key_overlap_days
+R_SEQ_RETRY_DEFAULT = _DEFAULTS.seq_retry_budget
+SKEW_DEFAULT = _DEFAULTS.clock_skew_tolerance_s
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 _REQUIRED_WHEN_ENABLED = (
