@@ -1,139 +1,138 @@
-# GraQle — give your AI a memory of how your organisation actually works
+# GraQle
 
-**Turn policies, decisions, documents and codebases into a persistent knowledge graph, so your AI agents reason over what your organisation already knows instead of rebuilding a partial picture every session.**
+**Give your AI agents a memory of how your organisation works - and check every decision before they act.**
+
+[![PyPI](https://img.shields.io/pypi/v/graqle?color=%2306b6d4&label=PyPI)](https://pypi.org/project/graqle/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-06b6d4.svg)](https://python.org)
+[![Model Agnostic](https://img.shields.io/badge/model-agnostic-06b6d4.svg)]()
+[![Local-first](https://img.shields.io/badge/local--first-no%20telemetry-22c55e.svg)](#trust)
 
 ```bash
 pip install graqle
 ```
 
-Models change. Tools change. Your institutional knowledge should not.
-
-**Works with your stack today** — 13 LLM backends plus any custom HTTP endpoint (Anthropic, OpenAI, Bedrock, Ollama, Gemini, Groq, DeepSeek, Together, Mistral, OpenRouter, Fireworks, Cohere, llama.cpp), fully offline with Ollama or llama.cpp, and inside Claude Code, Cursor, VS Code + Copilot or Windsurf via **85 MCP tools**. Local-first: no telemetry, and your source never leaves your machine.
-
----
-
-## 60-second proof — no code required
-
-Works on a folder with no code in it at all.
-
-```bash
-# 1. Turn organisational documents into a typed graph
-graq scan docs ./policies
-# → 3 files → 12 nodes: 3 Document + 9 Section, linked by SECTION_OF
-
-# 2. Teach it a rule that lives in nobody's file
-graq learn knowledge "vendor DPA must be signed before any data access" --domain policy
-# → auto-links the rule to the vendor-onboarding doc AND its "Due diligence" section
-
-# 3. Ask across the whole body of knowledge
-graq run "what approval is needed for a large refund?"
-# → answer + confidence + evidence trail + the sections consulted
-
-# 4. Audit what the organisation has taught it
-graq learned
-```
-
-Step 2 is the one that compounds — and the one prompt engineering cannot replace, because it needs a persistent typed graph as the substrate. GraQle worked out where that rule belonged on its own.
-
-### The same graph, for code
-
-```bash
-graq scan repo .                                    # functions, classes, imports, calls
-graq run "what breaks if I change the payment module?"
-graq impact payments.py                             # blast radius
-```
-
-Software architecture is the deepest-mapped domain today — a wedge, not the boundary.
-
----
-
-## Why this matters now
-
-Agents are getting far more capable and still start from zero every session. Models are becoming cheaper and interchangeable, which makes the intelligence layer above them — not the model itself — the thing worth owning.
-
-GraQle sits above the model:
-
-- **Relationships, not files.** Assistants see documents and files. GraQle sees how a policy, a decision and the code implementing it relate.
-- **Memory that compounds.** Policies, decisions and lessons become durable graph nodes, not chat history.
-- **Model independence.** Switch providers or IDEs without rebuilding the intelligence layer.
-
----
-
-## What you get
-
-| Capability | Command |
-|:---|:---|
-| Blast radius before a change | `graq impact payments.py` |
-| Cross-file security audit | `graq run "find every auth bypass risk"` |
-| Architecture Q&A for onboarding | `graq run "how does checkout work end to end?"` |
-| Persistent lessons | `graq learn knowledge "..."` |
-| Audit what the graph has been taught | `graq learned` |
-| Documents, policies, ADRs into the graph | `graq scan docs ./docs` |
-| Pre-change safety check | `graq preflight "refactor the auth layer"` |
-| CI/CD governance gate | `graq predict "..." --fail-below-threshold` |
-
----
-
-## Beyond code
-
-```bash
-pip install "graqle[docs]"          # PDF / DOCX / PPTX / XLSX parsers
-
-graq scan docs ./docs               # architecture docs, runbooks, specs
-graq learn doc ./policies/          # policies, ADRs, decision records
-```
-
-Documents become Document and Section nodes, linked by `SECTION_OF` — and to any code that implements them. Markdown, text, RST and AsciiDoc work with the base install; the richer formats need the `[docs]` extra and are reported — never silently skipped — when it's missing.
-
----
-
-## Configuring your stack
-
-Switching backend is one line — the graph is the constant, the model is a swappable input:
-
-```yaml
-# graqle.yaml
-model:
-  backend: ollama          # or: anthropic, openai, bedrock, gemini, groq...
-  model: llama3
-```
-
-```bash
-graq init    # detects your IDE and wires the MCP tools
-```
-
----
-
-## Trusted answers
-
-Every result carries `confidence`, `graph_health`, `active_nodes` and evidence pointers. Below the confidence floor, GraQle refuses rather than guesses. With no LLM configured it labels output as a placeholder and attaches no confidence score.
-
----
-
-## Governed autonomy
-
-When agents move from reading to writing, `graq gate-install` routes write/edit/bash operations through governance gates: plans required for risky changes, secret scanning on commits, full audit trail. For deployed systems, `GovernedRuntime.attest()` records what your AI decided, anchored to the public Sigstore Rekor transparency log — verifiable by any third party.
-
-Optional compliance surfaces for regulated deployments cover the EU AI Act, SOX/COSO, ISO/IEC 42001 and GDPR claim limits; compliance frameworks are authorable as data.
-
-→ [Full documentation on GitHub](https://github.com/quantamixsol/graqle)
-
----
-
-## Pricing
-
-| | Free | Pro ($19/mo) | Team ($29/dev/mo) |
-|:--|:--:|:--:|:--:|
-| CLI + SDK + 85 MCP tools | Unlimited | Unlimited | Unlimited |
-| 13 LLM backends + custom | ✅ | ✅ | ✅ |
-| Graph nodes | 1,000 | 25,000 | Unlimited |
-| Cloud sync | 1 project | 3 projects | Unlimited |
-| Shared team graphs + lessons | — | — | ✅ |
-
-[**graqle.com →**](https://graqle.com)
-
----
-
-*Built by Quantamix Solutions B.V. · Patent pending EP26167849.4 · Local by default · Your code never leaves your machine*
+[Website](https://graqle.com) · [Quickstart](#quickstart) · [Decision Assurance](#check-every-decision) · [Shared memory](#one-memory-for-a-team-of-agents) · [Changelog](https://github.com/quantamixsol/graqle/blob/master/CHANGELOG.md)
 
 <!-- mcp-name: io.github.quantamixsol/graqle -->
+
+---
+
+## What GraQle does
+
+1. **Remembers.** Turns your code, documents, policies and decisions into one connected knowledge graph that lasts beyond a chat session.
+2. **Checks.** Before an agent acts, the Decision Assurance Gate checks the action and answers **EXECUTE, REPLAN, HOLD, REJECT or ESCALATE** - with the reason and a signed record.
+3. **Shares.** One graph serves a whole team of agents - Claude Code, Cursor, Codex, Copilot - each with its own permissions and its own files.
+
+Works with any model: Anthropic, OpenAI, AWS Bedrock, Ollama, Gemini and more - or fully offline.
+
+---
+
+## Quickstart
+
+```bash
+pip install graqle
+
+graq scan docs ./policies          # documents, policies, ADRs -> graph
+graq scan repo .                   # code -> the same graph
+graq learn knowledge "vendor DPA must be signed before any data access"
+graq run "what approval is needed for a large refund?"
+# -> answer + confidence + the exact sources it used
+```
+
+Connect it to your AI tool (Claude Code, Cursor, Windsurf, VS Code):
+
+```bash
+graq init        # detects your IDE and wires GraQle in
+```
+
+PDF, DOCX, PPTX and XLSX: `pip install "graqle[docs]"`.
+
+---
+
+## Check every decision
+
+Most AI tools give you one confidence number. GraQle asks separate questions before an agent acts - and a good answer to one never hides a failed answer to another:
+
+- **Allowed?** Policy valid, actor authorised, evidence current, arguments exactly the approved ones. Any "no" stops the action.
+- **Consistent?** Contradicting facts are tracked in the graph, and a change updates every decision that depends on it.
+- **Sure enough?** Confidence is measured per dimension, not blended into one score.
+- **On track?** Unreliable step sequences are sent back to replan within a retry budget.
+- **Who approves?** Authority is checked for the action's impact level.
+
+| Answer | Meaning |
+|---|---|
+| `EXECUTE` | Everything checks out. Impossible after any failed check or error. |
+| `REPLAN` | Make a better plan and try again. |
+| `HOLD` | Something important is missing; wait for it. |
+| `REJECT` | Not allowed, or contradicted by the evidence. |
+| `ESCALATE` | A human decides. |
+
+```python
+from graqle.assurance.gate import DecisionAssuranceGate
+
+verdict = gate.evaluate(candidate, ctx)
+verdict.outcome         # EXECUTE | REPLAN | HOLD | REJECT | ESCALATE
+verdict.decisive_rule   # which rule decided
+verdict.reason_codes    # why
+```
+
+**Every decision leaves a sealed record:** a signed, hash-chained provenance event, exportable to W3C PROV-O and checkable with SHACL, so an auditor can verify it with standard tools. The gate is off by default; switch it on per project.
+
+---
+
+## One memory for a team of agents
+
+Several agents on one codebase usually means several copies of the same graph in memory. GraQle can hold it once:
+
+```bash
+# where the graph lives
+graq mcp serve --transport http --port 8765 --config graqle.yaml --allowed-roots /path/to/projects
+
+# in each agent session (.mcp.json)
+{ "mcpServers": { "graqle": { "command": "graq", "args": ["mcp", "relay", "--url", "http://127.0.0.1:8765"] } } }
+```
+
+- **Less memory.** Each session runs a small relay instead of a full copy ([measured](https://github.com/quantamixsol/graqle/blob/master/scripts/cr_infra_02c_measure_rss.output.txt) on a 20,000-node graph: 3 separate servers 687 MB, shared server + 3 relays 493 MB).
+- **Learning is shared at once** across all sessions.
+- **Each session keeps its own gates and its own files** - file work happens on each user's own machine.
+- **Teammates connect** over an SSH tunnel, or HTTPS with a token.
+- **Several projects, separate graphs** on one server (Team and Enterprise).
+
+---
+
+## Trust
+
+- **Local-first, no telemetry.** The graph is a file you control; nothing phones home.
+- **Secure by default.** The server needs authentication unless you explicitly switch on local development mode; graph uploads can never silently overwrite each other.
+- **Signed releases.** Sigstore-signed wheels, CycloneDX SBOM, reproducible builds.
+- **Regulated work.** Audit trail and evidence exports for your own EU AI Act file - GraQle provides evidence, it does not claim to make you compliant. [Details](https://github.com/quantamixsol/graqle/tree/master/docs/compliance/eu-ai-act)
+
+Report vulnerabilities to **security@quantamixsolutions.com** · [SECURITY.md](https://github.com/quantamixsol/graqle/blob/master/SECURITY.md)
+
+---
+
+## Editions
+
+| | What you get |
+|---|---|
+| **Free** | Knowledge graph, all core tools, governance gates, Decision Assurance Gate, shared server for one project |
+| **Pro — $19/mo** | Cloud sync, priority models, hosted transparency-log relay |
+| **Team — $29/dev/mo** | Shared graphs across projects (multi-project server), team lessons, audit-log retention |
+| **Enterprise** | On-premise, custom backends, support SLAs - [contact us](mailto:sales@quantamixsolutions.com) |
+
+---
+
+## Recent releases
+
+- **v0.87.0** — Decision Assurance Gate: five-answer decisions, contradiction tracking, confidence per dimension, replanning, signed provenance records.
+- **v0.86.0** — One memory for a team of agents: shared server, thin relay, per-session gates, file work on each user's machine; secure-by-default server.
+
+[Full changelog](https://github.com/quantamixsol/graqle/blob/master/CHANGELOG.md)
+
+---
+
+## Patent & license
+
+Core methods are patent-pending: **EP26167849.4**, **EP26162901.8** and **EP26166054.2**. Source is fully auditable under the GraQle License - see [LICENSE](https://github.com/quantamixsol/graqle/blob/master/LICENSE).
+
+**Built by [Quantamix Solutions](https://quantamixsolutions.com)** · [github.com/quantamixsol/graqle](https://github.com/quantamixsol/graqle)
