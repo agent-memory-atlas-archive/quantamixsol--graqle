@@ -33,7 +33,7 @@ def test_c04_missing_policy_cannot_be_papered_over_by_scope_wording() -> None:  
     assert not r.passed and r.reason_codes == ("DAG-HG01-POLICY_MISSING",)
 
 
-def test_c07_invalidated_evidence() -> None:  # HG-02 (placeholder fails closed)
+def test_c07_invalidated_evidence() -> None:  # HG-02
     ctx = make_ctx(dependency_nodes=(hg.DependencyNodeRef(node_id="n", status="INVALIDATED"),))
     r = _only("HG-02", ctx)
     assert not r.passed and r.reason_codes == ("DAG-HG02-EVIDENCE_INVALIDATED",)
@@ -45,7 +45,7 @@ def test_c01_duplicate_event_corroboration_without_a_source() -> None:  # HG-03
     assert not r.passed and r.reason_codes == ("DAG-HG03-PROVENANCE_MISSING",)
 
 
-def test_c09_argument_swap_after_approval() -> None:  # HG-04 (placeholder fails closed)
+def test_c09_argument_swap_after_approval() -> None:  # HG-04
     ctx = make_ctx(
         approved_args_hash="sha256:" + "a" * 64,
         actual_args_hash="sha256:" + "b" * 64,
@@ -53,7 +53,7 @@ def test_c09_argument_swap_after_approval() -> None:  # HG-04 (placeholder fails
         actual_args_algo="sha256",
     )
     r = _only("HG-04", ctx)
-    assert not r.passed and r.reason_codes == ("DAG-HG04-BINDING_ABSENT",)
+    assert not r.passed and r.reason_codes == ("DAG-HG04-ARGS_HASH_MISMATCH",)
 
 
 def test_c10_poisoned_memory_at_threshold() -> None:  # HG-05
@@ -89,7 +89,9 @@ def test_c12_contradiction_hidden_by_a_duplicate_resolved_record() -> None:  # H
 def test_c15_exception_injection_cannot_pass(monkeypatch: pytest.MonkeyPatch) -> None:  # all gates
     for cls in (
         hg.HG01MandatoryPolicy,
+        hg.HG02InvalidatedEvidence,
         hg.HG03ProvenanceForHighImpact,
+        hg.HG04ArgsBinding,
         hg.HG05Poisoning,
         hg.HG06ActorAuthorized,
         hg.HG07MaterialContradiction,
@@ -97,8 +99,4 @@ def test_c15_exception_injection_cannot_pass(monkeypatch: pytest.MonkeyPatch) ->
         monkeypatch.setattr(cls, "_predicate", lambda *a: 1 / 0)
     results = hg.default_registry().evaluate_all(make_ctx(), make_settings())
     assert not any(r.passed for r in results)
-    assert all(
-        "DAG-RP-EVALUATION_ERROR" in r.reason_codes
-        for r in results
-        if r.rule_id not in ("HG-02", "HG-04")
-    )
+    assert all("DAG-RP-EVALUATION_ERROR" in r.reason_codes for r in results)

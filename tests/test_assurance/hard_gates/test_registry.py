@@ -68,9 +68,9 @@ def test_evaluate_all_never_short_circuits(monkeypatch: pytest.MonkeyPatch) -> N
 def test_decisive_rule_is_first_failure_in_gate_order(settings) -> None:  # type: ignore[no-untyped-def]
     results = hg.default_registry().evaluate_all(make_ctx(policy=None), settings)
     assert hg.decisive_rule(results) == "HG-01"
-    # With HG-01 passing, the fail-closed HG-02 placeholder is decisive.
+    # With HG-01 and HG-02 passing, HG-04 (no CR-018 binding) is decisive.
     results = hg.default_registry().evaluate_all(make_ctx(), settings)
-    assert hg.decisive_rule(results) == "HG-02"
+    assert hg.decisive_rule(results) == "HG-04"
     assert not hg.all_passed(results)
 
 

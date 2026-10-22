@@ -67,16 +67,10 @@ def test_exceeding_the_gate_deadline_fails(monkeypatch) -> None:  # type: ignore
     assert r.error == "TimeoutError: gate deadline exceeded"
 
 
-@pytest.mark.parametrize("cls", [hg.HG02InvalidatedEvidence, hg.HG04ArgsBinding])
-def test_placeholders_fail_even_on_perfect_inputs(cls, settings) -> None:  # type: ignore[no-untyped-def]
-    ctx = make_ctx(
-        approved_args_hash="sha256:" + "a" * 64,
-        actual_args_hash="sha256:" + "a" * 64,
-        approved_args_algo="sha256",
-        actual_args_algo="sha256",
-    )
-    r = cls().evaluate(ctx, settings)
+def test_hg04_fails_closed_when_the_binding_is_absent(settings) -> None:  # type: ignore[no-untyped-def]
+    r = hg.HG04ArgsBinding().evaluate(make_ctx(), settings)
     assert not r.passed and r.error is None
+    assert r.reason_codes == ("DAG-HG04-BINDING_ABSENT",)
 
 
 class TestResultValidator:

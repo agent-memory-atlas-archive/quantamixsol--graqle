@@ -17,10 +17,10 @@ Invariants (CR-013 §2.2):
   an exceeded deadline is FAIL with ``error`` set and
   ``DAG-RP-EVALUATION_ERROR``; nothing can PASS by exception.
 
-Scope of this PR (PR-013a): HG-01, HG-03, HG-05, HG-06 and HG-07 are live.
-HG-02 and HG-04 are **fail-closed placeholders** that always FAIL until
-PR-013b wires them to the CR-017 invalidation and CR-018 argument-binding
-interfaces. Nothing here is called by ``GovernanceMiddleware``; the gate is
+All seven gates are live: HG-02 and HG-04 (PR-013b) read the CR-017
+invalidation fields of ``DependencyNodeRef`` and the CR-018
+``approved_args_*`` fields of ``GateContext``, and still fail closed while
+those fields are absent. Nothing here is called by ``GovernanceMiddleware``; the gate is
 consumed by ``DecisionAssuranceGate.evaluate()`` (CR-015) only.
 
 Trade-secret rule (CR-013 §12): thresholds reach a gate only through a frozen
@@ -38,6 +38,7 @@ from __future__ import annotations
 # constraints: never imported by graqle.governance.*; core/rbac.py and
 #   intelligence/governance/drace.py stay untouched (CR-013 AC-21)
 # -- /graqle:intelligence --
+import hmac
 import threading
 import time
 from collections.abc import Callable, Iterable
@@ -355,21 +356,25 @@ class HG01MandatoryPolicy(_BaseGate):
         return fired
 
 
-# ── HG-02 invalidated evidence — PLACEHOLDER until PR-013b ──────────────────
+# ── HG-02 invalidated evidence (CR-013 §5.4) ────────────────────────────────
 
 
 class HG02InvalidatedEvidence(_BaseGate):
-    """FAIL-CLOSED PLACEHOLDER (PR-013a). Always FAILs.
+    """FAIL when a dependency is invalidated and has not been recomputed.
 
-    The live predicate needs the CR-017 invalidation/recompute interface and
-    lands in PR-013b. Until then the gate cannot establish that evidence is
-    valid, so it fails closed. Severity is FAIL (resolvable, REPLAN-eligible)
-    per the OQ-4 ruling of 2026-09-13.
+    A node is invalid when the CR-017 ``dirty`` flag is set, or (pre-CR-017,
+    ``dirty is None``) when its ``status`` is ``INVALIDATED``. ``recomputed``
+    must be exactly ``True`` to clear it: ``None`` (unknown) is treated as
+    incomplete. Severity is FAIL (resolvable, REPLAN-eligible) per the OQ-4
+    ruling of 2026-09-13.
     """
 
     rule_id = "HG-02"
     severity = "FAIL"
-    _CODES = {"interface_pending": "DAG-HG02-EVIDENCE_INVALIDATED"}
+    _CODES = {
+        "evidence_invalidated": "DAG-HG02-EVIDENCE_INVALIDATED",
+        "recompute_incomplete": "DAG-HG02-RECOMPUTE_INCOMPLETE",
+    }
 
     def project(self, ctx: GateContext) -> dict[str, Any]:
         return {
@@ -379,7 +384,14 @@ class HG02InvalidatedEvidence(_BaseGate):
         }
 
     def _predicate(self, ctx: GateContext, settings: DagSettings, deadline: float) -> list[str]:
-        return ["interface_pending"]
+        fired: list[str] = []
+        for n in ctx.dependency_nodes:
+            invalid = n.dirty is True or n.status == "INVALIDATED"
+            if invalid and n.recomputed is not True:
+                fired.append(
+                    "evidence_invalidated" if n.recomputed is None else "recompute_incomplete"
+                )
+        return sorted(set(fired))
 
 
 # ── HG-03 provenance for high impact (CR-013 §5.4) ──────────────────────────
@@ -413,21 +425,25 @@ class HG03ProvenanceForHighImpact(_BaseGate):
         return []
 
 
-# ── HG-04 argument binding — PLACEHOLDER until PR-013b ──────────────────────
+# ── HG-04 argument binding (CR-013 §5.5) ────────────────────────────────────
 
 
 class HG04ArgsBinding(_BaseGate):
-    """FAIL-CLOSED PLACEHOLDER (PR-013a). Always FAILs.
+    """FAIL unless the executed arguments match the hash approved at grant time.
 
-    The approved-vs-actual argument binding is produced by CR-018 and wired in
-    PR-013b (constant-time comparison, algorithm pinned to
-    ``settings.args_hash_algo``). Until then no binding can be trusted, so the
-    gate fails closed with ``BINDING_ABSENT``.
+    Fail-closed: an absent approved or actual hash is ``BINDING_ABSENT`` (no
+    default hash is ever substituted); both algorithms must equal
+    ``settings.args_hash_algo``; the hashes are compared in constant time.
+    Only hashes are projected, never raw arguments.
     """
 
     rule_id = "HG-04"
     severity = "CRITICAL"
-    _CODES = {"binding_absent": "DAG-HG04-BINDING_ABSENT"}
+    _CODES = {
+        "binding_absent": "DAG-HG04-BINDING_ABSENT",
+        "algo_mismatch": "DAG-HG04-ARGS_HASH_ALGO_MISMATCH",
+        "hash_mismatch": "DAG-HG04-ARGS_HASH_MISMATCH",
+    }
 
     def project(self, ctx: GateContext) -> dict[str, Any]:
         return {
@@ -438,7 +454,18 @@ class HG04ArgsBinding(_BaseGate):
         }
 
     def _predicate(self, ctx: GateContext, settings: DagSettings, deadline: float) -> list[str]:
-        return ["binding_absent"]
+        if ctx.approved_args_hash is None or ctx.actual_args_hash is None:
+            return ["binding_absent"]
+        if (
+            ctx.approved_args_algo != ctx.actual_args_algo
+            or ctx.actual_args_algo != settings.args_hash_algo
+        ):
+            return ["algo_mismatch"]
+        if not hmac.compare_digest(
+            ctx.approved_args_hash.encode("utf-8"), ctx.actual_args_hash.encode("utf-8")
+        ):
+            return ["hash_mismatch"]
+        return []
 
 
 # ── HG-05 poisoning (CR-013 §5.5) ───────────────────────────────────────────
