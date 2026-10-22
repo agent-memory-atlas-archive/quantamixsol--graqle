@@ -110,10 +110,12 @@ def plan_migration(
             "secondary labels are OFF",
             n,
         )
+    # M1: hash only the assignments and the label decision, never the node/edge
+    # counts. Counts change on apply (the MIGRATION event + GENERATED edges), so
+    # hashing them made every re-plan produce a new hash, a new pev_migration_*
+    # event and duplicate GENERATED edges; see migration_event_id and AC-6.
     plan_hash = _canon_hash(
         {
-            "n": n,
-            "e": e,
             "assign": sorted([k, AssuranceClass(v).value] for k, v in assignments.items()),
             "labels": labels_enabled,
         }

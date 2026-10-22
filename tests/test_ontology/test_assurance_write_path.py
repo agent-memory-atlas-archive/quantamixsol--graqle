@@ -166,6 +166,53 @@ def test_save_never_writes_write_once_fields_of_an_assurance_node(
     assert row["subject"] == "s"  # ordinary properties still flow
 
 
+def test_save_flag_off_still_strips_at_warning_not_debug(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """M3: the flag-off data-handling delta is intentional (CR-021 D6); pin it."""
+    import logging
+
+    c, d = _connector(monkeypatch)  # flag off
+    node = {"label": "c1", "type": "ASSURANCE_CLAIM", "properties": claim("c1", "cid", *T_NEW)}
+    with caplog.at_level(logging.WARNING):
+        c.save({"c1": node}, {})
+    assert not set(WRITE_ONCE_NODE_FIELDS) & set(d.calls[0][1]["rows"][0])
+    assert "left write-once fields untouched on 1 assurance node" in caplog.text
+
+
+def test_save_flag_on_strips_a_stored_assurance_node_even_without_the_input_marker(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """D6 (10-01 amendment): with the flag ON, the guard reads the STORED node, not
+    the input dict -- a caller omitting ``assurance_type`` must not be trusted."""
+    import logging
+
+    monkeypatch.setenv("GRAQLE_DAG_ENABLED", "true")
+    c = n4j.Neo4jConnector()
+    d = FakeDriver(responses={"n.assurance_type IS NOT NULL": [{"id": "c1"}]})
+    c._driver = d
+    node = {"label": "c1", "type": "T", "properties": {"subject": "raw-caller-omitted-the-marker"}}
+    with caplog.at_level(logging.WARNING):
+        c.save({"c1": node}, {})
+    merge_call = [p for q, p in d.calls if "MERGE (n:CogniNode {id: row.id})" in q][0]
+    row = merge_call["rows"][0]
+    assert not set(WRITE_ONCE_NODE_FIELDS) & set(row)
+    assert "left write-once fields untouched on 1 assurance node" in caplog.text
+
+
+def test_save_flag_on_skips_a_stored_ordered_edge_even_without_the_input_marker(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("GRAQLE_DAG_ENABLED", "true")
+    c = n4j.Neo4jConnector()
+    d = FakeDriver(responses={"r.kind IN $kinds": [{"id": "e1"}]})
+    c._driver = d
+    edges = {"e1": {"source": "a", "target": "b", "relationship": "RELATES_TO"}}
+    c.save({}, edges)
+    assert not any("MERGE (a)-[r:" in q for q, _ in d.calls)
+    assert "skipped 1 SUPERSEDES/CORRECTS" in caplog.text
+
+
 def test_connector_constants_match_the_ops_module() -> None:
     assert n4j._ASSURANCE_WRITE_ONCE == WRITE_ONCE_NODE_FIELDS
     assert n4j._ASSURANCE_RESERVED == RESERVED_PROPS
@@ -332,6 +379,88 @@ def test_verifier_checks_constraints_by_shape_not_by_name() -> None:
     assert not rep.ok and "CONSTRAINT_MISSING" in rep.codes()
 
 
+def test_verifier_flags_a_node_stripped_of_assurance_type_but_still_signed() -> None:
+    """B4(i): REMOVE n.assurance_type must not take a signed node out of the check."""
+    node = {
+        "id": "n",
+        "assurance_type": None,
+        "canonical_id": "c",
+        "scope_key": "s",
+        "valid_from": T_NEW[0],
+        "asserted_at": T_NEW[1],
+    }
+    node["digest"] = node_digest(KEYRING, {**node, "assurance_type": "Claim"})
+    node["version"] = "v1"
+    rep = verify_assurance_integrity(_RowsConnector([[], [node], []]), KEYRING)
+    # signed with assurance_type="Claim"; the row handed to the verifier here has it
+    # stripped (None), simulating what a broadened selector must still catch and
+    # the digest check must still flag as changed.
+    assert not rep.ok and "NODE_DIGEST_MISMATCH" in rep.codes()
+
+
+def test_verifier_flags_an_sdk_edge_relabelled_to_an_unordered_kind() -> None:
+    """B4(ii): SET r.kind='DERIVED_FROM' on an SDK SUPERSEDES edge must not escape
+    the ordering/cardinality checks by walking out of the ``kinds IN $kinds`` filter."""
+    edge = {
+        "edge_id": "e",
+        "source_id": "a",
+        "target_id": "b",
+        "kind": "DERIVED_FROM",  # relabelled; was SUPERSEDES when signed
+        "scope_key": "s",
+        "prov_event_id": "p",
+        "asserted_at": T_NEW[1],
+        "supersedes_in": "b",
+        "supersedes_out": "a",
+        "corrects_in": None,
+        "corrects_out": None,
+        "a_asserted_at": T_NEW[1],
+        "a_valid_from": T_NEW[0],
+        "a_canonical_id": "ca",
+        "b_asserted_at": T_OLD[1],
+        "b_valid_from": T_OLD[0],
+        "b_canonical_id": "cb",
+    }
+    edge["digest"] = edge_digest(KEYRING, {**edge, "kind": "SUPERSEDES"})
+    edge["version"] = "v1"
+    rep = verify_assurance_integrity(_RowsConnector([[], [], [edge]]), KEYRING)
+    assert not rep.ok and "EDGE_DIGEST_MISMATCH" in rep.codes()
+
+
+def test_verifier_flags_a_supersedes_participant_missing_from_the_node_rows() -> None:
+    edge = {
+        "edge_id": "e",
+        "source_id": "a",
+        "target_id": "b",
+        "kind": "SUPERSEDES",
+        "scope_key": "s",
+        "prov_event_id": "p",
+        "asserted_at": T_NEW[1],
+        "supersedes_in": "b",
+        "supersedes_out": "a",
+        "corrects_in": None,
+        "corrects_out": None,
+        "a_asserted_at": T_NEW[1],
+        "a_valid_from": T_NEW[0],
+        "a_canonical_id": "ca",
+        "b_asserted_at": T_OLD[1],
+        "b_valid_from": T_OLD[0],
+        "b_canonical_id": "cb",
+        "digest": None,
+        "version": None,
+    }
+    rep = verify_assurance_integrity(_RowsConnector([[], [], [edge]]), KEYRING)
+    assert not rep.ok
+    assert "PARTICIPANT_NODE_MISSING" in rep.codes()
+    subjects = {f.subject for f in rep.findings if f.code == "PARTICIPANT_NODE_MISSING"}
+    assert subjects == {"a", "b"}
+
+
+def test_verifier_scope_key_mode_is_flagged_advisory() -> None:
+    rep = verify_assurance_integrity(_RowsConnector([[], [], []]), KEYRING, scope_key="s")
+    assert "SCOPED_MODE_ADVISORY" in rep.codes()
+    assert all(f.severity == "WARNING" for f in rep.findings if f.code == "SCOPED_MODE_ADVISORY")
+
+
 def test_validator_requires_canonical_id_on_ordered_edges() -> None:
     from graqle.ontology.assurance import edge_id, validate_assurance_graph
 
@@ -374,6 +503,46 @@ def test_constraint_rejection_is_classified_as_refused() -> None:
     assert _is_constraint_rejection(ConstraintError())
     assert not _is_constraint_rejection(TimeoutError())
     assert issubclass(AssuranceWriteRefusedError, KgPersistError)
+
+
+class _ConstraintRowsConnector:
+    """M2: a fake connector exposing only ``read_assurance_rows``, like
+    ``_RowsConnector`` above but counting calls to prove the check is cached."""
+
+    database = "neo4j"
+
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self._rows = rows
+        self.calls = 0
+
+    def read_assurance_rows(self, queries: list[Any]) -> list[list[dict[str, Any]]]:
+        self.calls += 1
+        return [self._rows]
+
+    def _get_driver(self) -> Any:  # pragma: no cover - must not be reached when refused
+        raise AssertionError("no write may happen without the DB constraints")
+
+
+def test_persist_assurance_ops_fails_closed_without_db_constraints() -> None:
+    conn = _ConstraintRowsConnector([])  # SHOW CONSTRAINTS returns nothing
+    persister = Neo4jBatchPersister(conn, integrity_keyring=KEYRING)
+    with pytest.raises(KgPersistError, match="constraints missing"):
+        persister.persist_assurance_ops([claim_op("x", "c", *T_NEW)])
+    assert conn.calls == 1
+
+
+def test_assurance_constraints_check_passes_by_shape_and_is_cached() -> None:
+    from graqle.ontology.assurance_integrity import ASSURANCE_CONSTRAINT_SHAPES
+
+    rows = [
+        {"name": f"legacy_{i}", "type": t, "labelsOrTypes": [lt], "properties": list(p)}
+        for i, (t, lt, p) in enumerate(ASSURANCE_CONSTRAINT_SHAPES.values())
+    ]
+    conn = _ConstraintRowsConnector(rows)
+    persister = Neo4jBatchPersister(conn, integrity_keyring=KEYRING)
+    persister._ensure_assurance_constraints()
+    persister._ensure_assurance_constraints()
+    assert conn.calls == 1  # checked once per persister instance, not once per op
 
 
 # ── AssuranceOntologyConfig loader ────────────────────────────────────────────

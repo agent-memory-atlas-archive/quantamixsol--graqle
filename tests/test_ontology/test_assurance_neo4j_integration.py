@@ -37,13 +37,17 @@ from graqle.ontology.assurance_migration import (
     rollback_migration,
     verify_migration,
 )
+from graqle.ontology.assurance_ops import AssuranceOp
 
 sys.path.insert(0, str(Path(__file__).parent))
 from _assurance_write_fixtures import KEYRING, SALT, SALT_NEXT, claim_op, edge_op  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
-CE_URI = os.environ.get("GRAQLE_TEST_NEO4J_CE_URI", "bolt://127.0.0.1:17687")
+CE_URI = os.environ.get(
+    "GRAQLE_TEST_NEO4J_CE_URI", os.environ.get("NEO4J_URI", "bolt://127.0.0.1:17687")
+)
+CE_PASSWORD = os.environ.get("NEO4J_PASSWORD", "unused")
 SHARED_PORT = 7687
 
 T1 = ("2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z")
@@ -62,7 +66,7 @@ def _scratch_or_skip() -> Neo4jConnector:
         from neo4j import GraphDatabase
     except ImportError:
         pytest.skip("neo4j driver not installed")
-    driver = GraphDatabase.driver(CE_URI, auth=("neo4j", "unused"))
+    driver = GraphDatabase.driver(CE_URI, auth=("neo4j", CE_PASSWORD))
     try:
         driver.verify_connectivity()
         with driver.session(database="system") as s:
@@ -79,7 +83,7 @@ def _scratch_or_skip() -> Neo4jConnector:
     if editions != {"community"}:
         driver.close()
         pytest.skip(f"{CE_URI} is {edition}, not a scratch Community Edition server; not wiping it")
-    conn = Neo4jConnector(uri=CE_URI, username="neo4j", password="unused", database="neo4j")
+    conn = Neo4jConnector(uri=CE_URI, username="neo4j", password=CE_PASSWORD, database="neo4j")
     conn._driver = driver
     return conn
 
@@ -250,7 +254,7 @@ def test_08_concurrent_race_commits_exactly_one(
 
     def race(i: int) -> None:
         # Own connector and driver per thread: eight separate connections.
-        conn = Neo4jConnector(uri=CE_URI, username="neo4j", password="unused", database="neo4j")
+        conn = Neo4jConnector(uri=CE_URI, username="neo4j", password=CE_PASSWORD, database="neo4j")
         p = Neo4jBatchPersister(conn, ensure_schema=False, integrity_keyring=KEYRING)
         conn._get_driver().verify_connectivity()
         barrier.wait()
@@ -344,6 +348,68 @@ def test_raw_cycle_is_detected_as_an_ordering_violation(
     )
     rep = verify_assurance_integrity(ce, KEYRING)
     assert {"ORDERING_VIOLATION", "EDGE_DIGEST_MISSING"} <= rep.codes()
+
+
+# ── B1/B2 forward-fix (OD-01b, PR-374 round-1 research review) ─────────
+
+
+def test_b1_set_if_absent_does_not_launder_a_tampered_non_participant(
+    ce: Neo4jConnector, persister: Neo4jBatchPersister
+) -> None:
+    """B1: strip a non-participant's digest (a WARNING only, per D9), tamper a
+    field, then run a set_if_absent that touches the same node but does not
+    itself fill assurance_type. The node must stay unsigned, not verify clean."""
+    persister.persist_assurance_ops([claim_op("a", "cid-a", *T1)])
+    _raw(ce, "MATCH (n {id:'a'}) REMOVE n.integrity_digest, n.integrity_hmac_version")
+    _raw(ce, "MATCH (n {id:'a'}) SET n.canonical_id = 'cid-tampered'")
+    persister.persist_assurance_ops(
+        [AssuranceOp.set_if_absent("a", {"lifecycle_status": "ACTIVE"})]
+    )
+    rec = _raw(ce, "MATCH (n {id:'a'}) RETURN n.integrity_digest AS d")[0]
+    assert rec["d"] is None  # not laundered: still unsigned, never a false OK
+
+
+def test_b2_create_edge_refuses_an_endpoint_whose_digest_is_unverified(
+    ce: Neo4jConnector, persister: Neo4jBatchPersister
+) -> None:
+    """B2: a raw write to an endpoint followed by an SDK create_edge must not be
+    able to fabricate an SDK-looking ordered edge on top of unverified data."""
+    persister.persist_assurance_ops([claim_op("old", "cid-o", *T1), claim_op("new", "cid-n", *T2)])
+    _raw(ce, "MATCH (n {id:'old'}) SET n.asserted_at = $v", v="2026-08-01T00:00:00Z")
+    with pytest.raises(AssuranceWriteRefusedError, match="integrity digest"):
+        persister.persist_assurance_ops([edge_op("new", "old", EdgeKind.SUPERSEDES)])
+    assert _raw(ce, "MATCH ()-[r]->() RETURN count(r) AS c")[0]["c"] == 0
+
+
+def test_b4i_removing_assurance_type_does_not_remove_the_node_from_the_check(
+    ce: Neo4jConnector, persister: Neo4jBatchPersister
+) -> None:
+    """B4(i): REMOVE n.assurance_type must not take a signed node out of the
+    verifier's selector; the node is still digest-checked and flagged."""
+    persister.persist_assurance_ops([claim_op("a", "cid-a", *T1)])
+    _raw(ce, "MATCH (n {id:'a'}) REMOVE n.assurance_type")
+    rep = verify_assurance_integrity(ce, KEYRING)
+    assert not rep.ok
+    assert "NODE_DIGEST_MISMATCH" in rep.codes()
+
+
+def test_b4ii_relabelling_an_sdk_supersedes_edge_is_detected(
+    ce: Neo4jConnector, persister: Neo4jBatchPersister
+) -> None:
+    """B4(ii): SET r.kind='DERIVED_FROM' on an SDK SUPERSEDES edge must not
+    silently remove the supersession from the check by walking the edge out of
+    the ordered-kinds filter."""
+    persister.persist_assurance_ops(
+        [
+            claim_op("old", "cid-o", *T1),
+            claim_op("new", "cid-n", *T2),
+            edge_op("new", "old", EdgeKind.SUPERSEDES),
+        ]
+    )
+    _raw(ce, "MATCH ()-[r:RELATES_TO {kind:'SUPERSEDES'}]->() SET r.kind = 'DERIVED_FROM'")
+    rep = verify_assurance_integrity(ce, KEYRING)
+    assert not rep.ok
+    assert "EDGE_DIGEST_MISMATCH" in rep.codes()
 
 
 # ── key rotation ─────────────────────────────────────────────────────────────
@@ -460,12 +526,48 @@ def _snapshot(conn: Neo4jConnector) -> tuple[Any, Any]:
     return nodes, rels
 
 
+def _without_provenance_events(snapshot: tuple[Any, Any]) -> tuple[Any, Any]:
+    """AC-7 amendment (B3): snapshot equality outside ProvenanceEvent nodes and
+    their edges. rollback_migration now marks the MIGRATION event ROLLED_BACK and
+    adds a ROLLBACK ProvenanceEvent instead of deleting the MIGRATION record, so a
+    byte-identical full-graph snapshot is no longer the right check for rollback."""
+    nodes, rels = snapshot
+    kept_ids = {n["id"] for n in nodes if n["p"].get("assurance_type") != "ProvenanceEvent"}
+    return (
+        [n for n in nodes if n["id"] in kept_ids],
+        [r for r in rels if r["a"] in kept_ids and r["b"] in kept_ids],
+    )
+
+
 _CFG = AssuranceOntologyConfig(
     secondary_labels_enabled=True,
     label_safe_node_ceiling=100_000,
     migration_batch_size=97,
     scope_key_fields=("f_alpha",),
 )
+
+
+def test_b3_rollback_refuses_the_whole_batch_when_a_migrated_node_is_tampered(
+    ce: Neo4jConnector, persister: Neo4jBatchPersister
+) -> None:
+    """B3: rollback must verify every digest before stripping anything, and
+    refuse the whole rollback on MISMATCH rather than launder the tamper by
+    removing the evidence."""
+    n = 5
+    _seed_substrate(ce, n)
+    assigned = [f"sub{i}" for i in range(n)]
+    plan = plan_migration(ce, _CFG, _Rules(assigned))
+    apply_migration(persister, plan, dry_run=False)
+    _raw(ce, "MATCH (n {id:'sub0'}) SET n.valid_from = $v", v="1999-01-01T00:00:00Z")
+    with pytest.raises(AssuranceWriteRefusedError, match="MISMATCH"):
+        rollback_migration(persister)
+    # refused as a whole: sub1's digest is still there, and the MIGRATION event
+    # was not marked ROLLED_BACK
+    assert _raw(ce, "MATCH (n {id:'sub1'}) RETURN n.integrity_digest AS d")[0]["d"] is not None
+    assert (
+        _raw(ce, "MATCH (ev {event_type:'MIGRATION'}) RETURN ev.lifecycle_status AS s")[0]["s"]
+        != "ROLLED_BACK"
+    )
 
 
 def test_ac6_ac7_migration_plan_apply_reapply_rollback(
@@ -498,11 +600,26 @@ def test_ac6_ac7_migration_plan_apply_reapply_rollback(
     again = apply_migration(persister, plan, dry_run=False)  # AC-6: idempotent
     assert again.applied and _snapshot(ce) == after_once
 
+    # M1: a FRESH plan_migration() after apply must hash the same, not the
+    # mutated node/edge counts (that was the pre-fix bug: every re-plan produced
+    # a new hash, a new pev_migration_* event and duplicate GENERATED edges).
+    replanned = plan_migration(ce, _CFG, _Rules(assigned))
+    assert replanned.plan_hash == plan.plan_hash
+    assert _snapshot(ce) == after_once
+
     # sub1 kept the valid_from it had before the migration
     assert (
         _raw(ce, "MATCH (n {id:'sub1'}) RETURN n.valid_from AS v")[0]["v"] == "2020-01-01T00:00:00Z"
     )
 
-    out = rollback_migration(persister)  # AC-7
+    out = rollback_migration(persister)  # AC-7 (amended)
     assert out["events"] == 1 and out["nodes"] == len(assigned)
-    assert _snapshot(ce) == before  # every node, label, property and edge, HAS_CHUNK included
+    # every substrate node, label, property and edge, HAS_CHUNK included, outside
+    # ProvenanceEvent nodes and their edges (the MIGRATION event is now marked
+    # ROLLED_BACK and a ROLLBACK event is added, not deleted)
+    assert _without_provenance_events(_snapshot(ce)) == _without_provenance_events(before)
+    assert (
+        _raw(ce, "MATCH (ev {event_type:'MIGRATION'}) RETURN ev.lifecycle_status AS s")[0]["s"]
+        == "ROLLED_BACK"
+    )
+    assert _raw(ce, "MATCH (ev {event_type:'ROLLBACK'}) RETURN count(ev) AS c")[0]["c"] == 1

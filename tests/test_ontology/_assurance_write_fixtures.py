@@ -76,11 +76,19 @@ class FakeResult:
 
 
 class FakeSession:
-    def __init__(self, calls: list[tuple[str, dict[str, Any]]]) -> None:
+    def __init__(
+        self,
+        calls: list[tuple[str, dict[str, Any]]],
+        responses: dict[str, list[dict[str, Any]]] | None = None,
+    ) -> None:
         self.calls = calls
+        self._responses = responses or {}
 
     def run(self, query: str, **params: Any) -> FakeResult:
         self.calls.append((query, params))
+        for substring, rows in self._responses.items():
+            if substring in query:
+                return FakeResult(rows)
         return FakeResult()
 
     def __enter__(self) -> FakeSession:
@@ -91,11 +99,12 @@ class FakeSession:
 
 
 class FakeDriver:
-    def __init__(self) -> None:
+    def __init__(self, responses: dict[str, list[dict[str, Any]]] | None = None) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self._responses = responses or {}
 
     def session(self, **_: Any) -> FakeSession:
-        return FakeSession(self.calls)
+        return FakeSession(self.calls, self._responses)
 
 
 def calls_digest(calls: list[tuple[str, dict[str, Any]]]) -> str:

@@ -150,6 +150,7 @@ class Neo4jBatchPersister:
         self._ensure_schema = ensure_schema
         self._schema_ready = False
         self._keyring = integrity_keyring
+        self._assurance_constraints_checked = False
 
     @property
     def connector(self) -> Neo4jConnector:
@@ -172,6 +173,7 @@ class Neo4jBatchPersister:
             )
         if not ops:
             return
+        self._ensure_assurance_constraints()
         try:
             # lazy: the private write path
             from graqle.governance.tamper_evidence import _assurance_write
@@ -189,16 +191,62 @@ class Neo4jBatchPersister:
             logger.error("assurance write failed (%d ops)", len(ops), exc_info=True)
             raise KgPersistError(f"failed to persist {len(ops)} assurance op(s): {exc}") from exc
 
+    def _ensure_assurance_constraints(self) -> None:
+        """M2: fail closed if the DB constraints rules (a) and (b) rely on are absent.
+
+        ``create_assurance_schema`` only runs from flag-on ``create_schema()``, so on a
+        database where it never ran, the constraints that reject a duplicate version or
+        a second SUPERSEDES/CORRECTS in/out are simply missing and writes would land
+        silently. Checked once per persister instance, by shape (not by name), reusing
+        :data:`ASSURANCE_CONSTRAINT_SHAPES`.
+        """
+        if self._assurance_constraints_checked:
+            return
+        from graqle.ontology.assurance_integrity import ASSURANCE_CONSTRAINT_SHAPES  # lazy
+
+        try:
+            rows = self._connector.read_assurance_rows(
+                [("SHOW CONSTRAINTS YIELD name, type, labelsOrTypes, properties RETURN *", {})]
+            )[0]
+        except Exception as exc:  # noqa: BLE001 - an unmeasured DB is never ready
+            raise KgPersistError(f"failed to read DB constraints: {exc}") from exc
+        present = {
+            (r.get("type"), tuple(r.get("labelsOrTypes") or ()), tuple(r.get("properties") or ()))
+            for r in rows
+        }
+        missing = sorted(
+            name
+            for name, (ctype, target, props) in ASSURANCE_CONSTRAINT_SHAPES.items()
+            if (ctype, (target,), props) not in present
+        )
+        if missing:
+            raise KgPersistError(
+                f"assurance DB constraints missing: {', '.join(missing)}; "
+                "run create_assurance_schema() before persist_assurance_ops"
+            )
+        self._assurance_constraints_checked = True
+
     def rollback_assurance_migration(self) -> dict[str, int]:
-        """Undo every MIGRATION event through the private write path (CR-016 §5.3)."""
+        """Undo every open MIGRATION event through the private write path (CR-016 §5.3, B3)."""
+        if self._keyring is None:
+            raise KgPersistError(
+                "rollback_assurance_migration needs an integrity keyring; refusing to strip "
+                "unverified digests"
+            )
         try:
             # lazy: the private write path
             from graqle.governance.tamper_evidence import _assurance_write
 
             return _assurance_write.rollback_migration(
-                self._connector._get_driver(), self._connector.database
+                self._connector._get_driver(), self._connector.database, self._keyring
             )
+        except KgPersistError:
+            raise
         except Exception as exc:  # noqa: BLE001 - wrap-and-propagate by design
+            if _is_constraint_rejection(exc):
+                raise AssuranceWriteRefusedError(
+                    f"DB constraint rejected the rollback: {exc}"
+                ) from exc
             raise KgPersistError(f"assurance migration rollback failed: {exc}") from exc
 
     def __call__(self, batch: "BatchCommit") -> None:

@@ -356,8 +356,12 @@ class IntegrityViolationError(RuntimeError):
         super().__init__(f"assurance integrity check failed: {codes}")
 
 
+#: B4: select by what is SIGNED (or marks a migration touched it), never by a
+#: field a raw writer can clear to walk a node or edge out of the check.
 _NODES_Q = (
-    "MATCH (n:CogniNode) WHERE n.assurance_type IS NOT NULL "
+    "MATCH (n:CogniNode) "
+    "WHERE (n.assurance_type IS NOT NULL OR n.integrity_digest IS NOT NULL "
+    "OR n.assurance_filled_fields IS NOT NULL) "
     "AND ($scope IS NULL OR n.scope_key = $scope) "
     "RETURN n.id AS id, n.assurance_type AS assurance_type, n.canonical_id AS canonical_id, "
     "n.scope_key AS scope_key, n.valid_from AS valid_from, n.asserted_at AS asserted_at, "
@@ -365,7 +369,9 @@ _NODES_Q = (
 )
 _EDGES_Q = (
     "MATCH (a:CogniNode)-[r:RELATES_TO]->(b:CogniNode) "
-    "WHERE r.kind IN $kinds AND ($scope IS NULL OR r.scope_key = $scope) "
+    "WHERE (r.kind IN $kinds OR r.integrity_digest IS NOT NULL OR r.supersedes_in IS NOT NULL "
+    "OR r.supersedes_out IS NOT NULL OR r.corrects_in IS NOT NULL OR r.corrects_out IS NOT NULL) "
+    "AND ($scope IS NULL OR r.scope_key = $scope) "
     "RETURN r.id AS edge_id, a.id AS source_id, b.id AS target_id, r.kind AS kind, "
     "r.scope_key AS scope_key, r.prov_event_id AS prov_event_id, r.asserted_at AS asserted_at, "
     "r.supersedes_in AS supersedes_in, r.supersedes_out AS supersedes_out, "
@@ -406,6 +412,18 @@ def verify_assurance_integrity(
 
     if keyring is None:
         add("VERIFIER_UNKEYED", "-", "no integrity keyring: digests cannot be checked")
+    if scope_key is not None:
+        # B4: scoped mode is advisory, not a narrower bounded guarantee. It misses a
+        # raw change to scope_key that moves an item out of this scope, and any
+        # cross-scope SUPERSEDES/CORRECTS participant. Run unscoped for the full
+        # bounded claim; a scoped run is a convenience view of one scope's findings.
+        add(
+            "SCOPED_MODE_ADVISORY",
+            scope_key,
+            "scoped verification does not catch a raw scope_key change or a "
+            "cross-scope participant; run unscoped for the bounded claim",
+            "WARNING",
+        )
     try:
         rows = connector.read_assurance_rows(
             [
@@ -427,9 +445,17 @@ def verify_assurance_integrity(
         if (ctype, (target,), props) not in present:
             add("CONSTRAINT_MISSING", name, "no DB constraint enforces this")
 
+    node_ids = {str(n["id"]) for n in node_rows}
     participants: set[str] = set()
     for e in edge_rows:
-        participants.update((e["source_id"], e["target_id"]))
+        if str(e["kind"]) in _ORDERED_KINDS:
+            participants.update((str(e["source_id"]), str(e["target_id"])))
+
+    for pid in sorted(participants - node_ids):
+        # B4: a SUPERSEDES/CORRECTS participant absent from the signed node set
+        # cannot have its digest checked at all -- that absence is itself a finding,
+        # not a silent pass.
+        add("PARTICIPANT_NODE_MISSING", pid, "SUPERSEDES/CORRECTS participant has no signed node row")
 
     for n in node_rows:
         nid = str(n["id"])
@@ -458,34 +484,38 @@ def verify_assurance_integrity(
     for e in edge_rows:
         kind = str(e["kind"])
         subject = f"{e['source_id']}-[{kind}]->{e['target_id']}"
-        reason = ordering_violation(
-            kind,
-            {"asserted_at": e["a_asserted_at"], "valid_from": e["a_valid_from"]},
-            {"asserted_at": e["b_asserted_at"], "valid_from": e["b_valid_from"]},
-        )
-        if reason:
-            add("ORDERING_VIOLATION", subject, reason)
-        for side in ("a", "b"):
-            if not e.get(f"{side}_canonical_id"):
+        # B4: the ordering/cardinality rules are specific to the ordered kinds; a
+        # GENERATED, USED or other signed edge has neither and is skipped here, but
+        # is still digest-verified below like every other selected edge.
+        if kind in _ORDERED_KINDS:
+            reason = ordering_violation(
+                kind,
+                {"asserted_at": e["a_asserted_at"], "valid_from": e["a_valid_from"]},
+                {"asserted_at": e["b_asserted_at"], "valid_from": e["b_valid_from"]},
+            )
+            if reason:
+                add("ORDERING_VIOLATION", subject, reason)
+            for side in ("a", "b"):
+                if not e.get(f"{side}_canonical_id"):
+                    add(
+                        "MISSING_CANONICAL_ID",
+                        subject,
+                        f"{'source' if side == 'a' else 'target'} has no canonical_id",
+                    )
+            in_prop, out_prop = _CARDINALITY[kind]
+            if e.get(in_prop) != e["target_id"] or e.get(out_prop) != e["source_id"]:
                 add(
-                    "MISSING_CANONICAL_ID",
+                    "CARDINALITY_PROP_MISMATCH",
                     subject,
-                    f"{'source' if side == 'a' else 'target'} has no canonical_id",
+                    f"{in_prop}/{out_prop} do not equal the endpoints",
                 )
-        in_prop, out_prop = _CARDINALITY[kind]
-        if e.get(in_prop) != e["target_id"] or e.get(out_prop) != e["source_id"]:
-            add(
-                "CARDINALITY_PROP_MISMATCH",
-                subject,
-                f"{in_prop}/{out_prop} do not equal the endpoints",
-            )
-        other = [p for k, pair in _CARDINALITY.items() if k != kind for p in pair]
-        if any(e.get(p) is not None for p in other):
-            add(
-                "CARDINALITY_PROP_MISMATCH",
-                subject,
-                "carries the other kind's cardinality properties",
-            )
+            other = [p for k, pair in _CARDINALITY.items() if k != kind for p in pair]
+            if any(e.get(p) is not None for p in other):
+                add(
+                    "CARDINALITY_PROP_MISMATCH",
+                    subject,
+                    "carries the other kind's cardinality properties",
+                )
         if keyring is None:
             continue
         status = verify_digest(keyring, "edge", e, e.get("digest"), e.get("version"))

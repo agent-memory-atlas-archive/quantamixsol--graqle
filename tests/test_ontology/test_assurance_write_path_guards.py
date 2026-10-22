@@ -18,14 +18,18 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 PROTECTED: dict[str, str] = {
+    # OD-01b (PR-374 round-1 research review): B1-B4 land in both files below.
     "graqle/governance/tamper_evidence/_assurance_write.py": (
-        "43adf26e7573b8f085240851c6b39c0c96098abbb81ca5a6d4a89c2f41706c2f"
+        "16121ceebf0b4c89d72b5ddf89382d82340a056eb7e1ed5ad0c7b2200e6c6405"
     ),
     "scripts/ci/assurance_write_path_gate.py": (
         "590fe197e77deb1436096c133f426ff17616bc7e42a585cc05cb33459af14ecc"
     ),
+    # Re-pinned after ecf10f80 (CR-016/OD-01b): the B4 participant-set check now
+    # coerces edge endpoint ids to str before the membership test; one line in
+    # assurance_integrity.py, no behaviour change outside that coercion.
     "graqle/ontology/assurance_integrity.py": (
-        "6a1d8ea5ef5210940b9983f4f6678cf8e5d91f706143800d813c6d6949ea13c2"
+        "9ec90d539e161b1937b48ddfa35396bfac2c46c1cd6e78cc61f14a384495a780"
     ),
 }
 

@@ -304,6 +304,37 @@ class Neo4jConnector(BaseConnector):
         skipped_ordered = 0
         stripped_nodes = 0
 
+        # CR-016 PR-016b D6 (10-01 amendment): with the DAG flag ON, the guard looks
+        # at the STORED node/edge, not the input dict -- a caller can omit
+        # assurance_type / kind from this call even though the node or edge already
+        # carries one. M3: this stripping and the ordered-edge skip apply regardless
+        # of the flag (an intentional flag-off delta, CR-021 D6: save() is not a
+        # restore path for assurance data); only the stored-state lookup is flag-gated.
+        dag_on = os.environ.get(ENV_FLAG, "").strip().lower() in _FLAG_TRUTHY
+        stored_assurance_ids: set[str] = set()
+        stored_ordered_edge_ids: set[str] = set()
+        if dag_on and (nodes or edges):
+            with driver.session(database=self._database) as lookup:
+                if nodes:
+                    stored_assurance_ids = {
+                        r["id"]
+                        for r in lookup.run(
+                            "UNWIND $ids AS id MATCH (n:CogniNode {id: id}) "
+                            "WHERE n.assurance_type IS NOT NULL RETURN n.id AS id",
+                            ids=list(nodes),
+                        )
+                    }
+                if edges:
+                    stored_ordered_edge_ids = {
+                        r["id"]
+                        for r in lookup.run(
+                            "UNWIND $ids AS id MATCH ()-[r:RELATES_TO {id: id}]->() "
+                            "WHERE r.kind IN $kinds RETURN r.id AS id",
+                            ids=list(edges),
+                            kinds=list(_ORDERED_EDGE_KINDS),
+                        )
+                    }
+
         # Prepare node data
         node_rows = []
         for nid, data in nodes.items():
@@ -320,7 +351,7 @@ class Neo4jConnector(BaseConnector):
             # properties only the write path sets; existing values are kept
             # because ``SET n += row`` does not remove absent keys.
             skip: frozenset[str] | set[str] = _ASSURANCE_RESERVED
-            if "assurance_type" in props:
+            if "assurance_type" in props or nid in stored_assurance_ids:
                 skip = _ASSURANCE_RESERVED | set(_ASSURANCE_WRITE_ONCE)
                 stripped_nodes += 1
             for k, v in props.items():
@@ -345,10 +376,13 @@ class Neo4jConnector(BaseConnector):
             # carry an assurance ``kind``.
             eprops = data.get("properties") or {}
             kind = data.get("kind", eprops.get("kind"))
+            is_ordered = (kind is not None and str(kind) in _ORDERED_EDGE_KINDS) or (
+                eid in stored_ordered_edge_ids
+            )
+            if is_ordered:
+                skipped_ordered += 1
+                continue
             if kind is not None:
-                if str(kind) in _ORDERED_EDGE_KINDS:
-                    skipped_ordered += 1
-                    continue
                 merged = {**eprops, **{k: data[k] for k in _ASSURANCE_EDGE_PROPS if k in data}}
                 row["props"] = {
                     k: merged[k]
@@ -363,7 +397,10 @@ class Neo4jConnector(BaseConnector):
                 skipped_ordered,
             )
         if stripped_nodes:
-            logger.debug(
+            # M3: WARNING, not DEBUG -- this is a flag-off save() into a fresh DB
+            # (restore, backend move) silently dropping assurance write-once fields,
+            # not a routine no-op.
+            logger.warning(
                 "save() left write-once fields untouched on %d assurance node(s)", stripped_nodes
             )
 
