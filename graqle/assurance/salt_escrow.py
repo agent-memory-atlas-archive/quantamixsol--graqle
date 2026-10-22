@@ -27,12 +27,12 @@ import re
 import stat
 import tempfile
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from graqle.assurance.provenance_event import REDACTABLE_FIELDS
 from graqle.core.exceptions import GraqleError
 
-__all__ = ["SaltEscrow", "FileSaltEscrow", "SaltEscrowError"]
+__all__ = ["SaltEscrow", "FileSaltEscrow", "Neo4jSaltEscrow", "SaltEscrowError"]
 
 # \Z, not $: "$" would also accept a trailing newline.
 _EVENT_ID_RE = re.compile(r"^evt_[0-9A-HJKMNP-TV-Z]{26}\Z")
@@ -125,3 +125,77 @@ class FileSaltEscrow:
         _validate(event_id)
         with contextlib.suppress(FileNotFoundError):
             os.unlink(self._path(event_id))
+
+
+class Neo4jSaltEscrow:
+    """``(:ProvenanceSalt {event_id, field_path, salt_hex})`` via ``execute_write``.
+
+    A separate label keeps salts separately deletable (redaction = delete).
+    """
+
+    def __init__(self, driver: Any, database: str | None = None) -> None:
+        self._driver = driver
+        self._db = database
+
+    def put(self, event_id: str, salts: dict[str, bytes]) -> None:
+        _validate(event_id, salts)
+        rows = [{"p": p, "s": s.hex()} for p, s in sorted(salts.items())]
+
+        def _write(tx: Any) -> None:
+            existing = tx.run(
+                "MATCH (s:ProvenanceSalt {event_id:$id}) RETURN count(s) AS n", id=event_id
+            ).single()
+            if existing is not None and existing["n"]:
+                raise SaltEscrowError(f"salts for {event_id} already escrowed")
+            tx.run(
+                "UNWIND $rows AS r "
+                "CREATE (:ProvenanceSalt {event_id:$id, field_path:r.p, salt_hex:r.s})",
+                id=event_id,
+                rows=rows,
+            )
+
+        try:
+            with self._driver.session(database=self._db) as session:
+                session.execute_write(_write)
+        except SaltEscrowError:
+            raise
+        except Exception as exc:  # fail closed: no escrow means no persist
+            raise SaltEscrowError(f"salts not escrowed ({type(exc).__name__})") from exc
+
+    def get(self, event_id: str) -> dict[str, bytes]:
+        _validate(event_id)
+
+        def _read(tx: Any) -> list[Any]:
+            return list(
+                tx.run(
+                    "MATCH (s:ProvenanceSalt {event_id:$id}) "
+                    "RETURN s.field_path AS p, s.salt_hex AS h",
+                    id=event_id,
+                )
+            )
+
+        try:
+            with self._driver.session(database=self._db) as session:
+                rows = session.execute_read(_read)
+            salts: dict[str, bytes] = {}
+            for row in rows:
+                if row["p"] not in REDACTABLE_FIELDS or not _SALT_HEX_RE.match(str(row["h"])):
+                    raise ValueError("bad escrow row")
+                salts[row["p"]] = bytes.fromhex(row["h"])
+        except (ValueError, TypeError) as exc:
+            raise SaltEscrowError(f"escrow entry for {event_id} is malformed") from exc
+        except Exception as exc:
+            raise SaltEscrowError(f"salts not readable ({type(exc).__name__})") from exc
+        return salts
+
+    def delete(self, event_id: str) -> None:
+        _validate(event_id)
+
+        def _write(tx: Any) -> None:
+            tx.run("MATCH (s:ProvenanceSalt {event_id:$id}) DELETE s", id=event_id)
+
+        try:
+            with self._driver.session(database=self._db) as session:
+                session.execute_write(_write)
+        except Exception as exc:
+            raise SaltEscrowError(f"salts not deleted ({type(exc).__name__})") from exc

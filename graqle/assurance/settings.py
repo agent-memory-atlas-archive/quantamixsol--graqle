@@ -48,7 +48,7 @@ import threading
 from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
 from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
@@ -59,6 +59,9 @@ from graqle.config.exceptions import (  # noqa: F401  (re-exported, see below)
     ConfigurationError,
     GraqleConfigError,
 )
+
+if TYPE_CHECKING:
+    from graqle.assurance.provenance_settings import ProvenanceSettings
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +284,19 @@ class DagSettings(BaseSettings):
     # ── CR-019 benchmark harness ──────────────────────────────────────────
     bench_results_dir: str = ".graqle/dag/bench"
     bench_seed: int = 20260911                            # operational safe default
+
+    @property
+    def provenance(self) -> ProvenanceSettings | None:
+        """CR-018 provenance sub-model, mounted here per ruling R3.
+
+        Read-through: built from the environment on access (env-only, secret
+        class) and ``None`` while the flag is off, so flag-off construction is
+        unchanged and ``config_version`` (which dumps fields only) is stable.
+        The flat ``signing_key_*`` fields above remain for one minor release.
+        """
+        from graqle.assurance.provenance_settings import load_provenance_settings
+
+        return load_provenance_settings(force_enabled=self.enabled)
 
     @field_validator("enabled", mode="before")
     @classmethod
@@ -519,6 +535,10 @@ def _unknown_prefixed_env_vars() -> list[str]:
     is explicit here. Returns NAMES only.
     """
     known = {env_name(f).upper() for f in DagSettings.model_fields}
+    # CR-018 (ruling R3): the nested provenance sub-model owns its own names.
+    from graqle.assurance.provenance_settings import provenance_env_names
+
+    known |= provenance_env_names()
     if any(k.upper().startswith(CV_ENV_PREFIX) for k in os.environ):
         # Lazy: the vector modules load only when a vector variable is present.
         from graqle.assurance.cv_settings import cv_env_names

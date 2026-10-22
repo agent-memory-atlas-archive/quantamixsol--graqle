@@ -365,6 +365,34 @@ _SEED: tuple[ReasonCode, ...] = (
         "sequence_number gap detected.",
         "0.85.0",
     ),
+    ReasonCode(
+        "DAG-PV-SEQ-CONFLICT",
+        Severity.FAIL,
+        "PV",
+        "Sequence allocation lost its race and the retry budget is spent.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-PV-RECORD-FAILED",
+        Severity.CRITICAL,
+        "PV",
+        "Provenance event could not be recorded; execution must not proceed.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-PV-KEY-ROTATED",
+        Severity.INFO,
+        "PV",
+        "Signing key rotated; successor key is active.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-PV-KEYING_UNRECOGNISED",
+        Severity.FAIL,
+        "PV",
+        "config_provenance keying is outside the closed allow-list; not anchored.",
+        "0.86.0",
+    ),
     # Conflict resolution and dependency propagation (CR-017)
     ReasonCode(
         "DAG-PV-INVALIDATED",
