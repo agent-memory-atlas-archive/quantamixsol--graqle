@@ -88,6 +88,8 @@ __all__ = [
 #: flag-OFF path without importing this module.
 #: Prefix shared by every DAG setting (``GRAQLE_DAG_<FIELD>``).
 ENV_PREFIX = "GRAQLE_DAG_"
+#: Prefix of the confidence-vector variables (see ``cv_settings``).
+CV_ENV_PREFIX = ENV_PREFIX + "CV_"
 #: Default location of the gitignored private-values file (brief §8.3).
 DEFAULT_SECRETS_PATH = ".graqle/graqle_secrets.yaml"
 
@@ -234,6 +236,8 @@ class DagSettings(BaseSettings):
 
     # ── CR-014 confidence vector ──────────────────────────────────────────
     calibrator_version: str | None = None
+    # Deprecated read-through alias of GRAQLE_DAG_CV_CALIBRATOR_TTL_SECONDS (every
+    # duration is in seconds); kept for one minor. See cv_settings.
     calibrator_ttl_hours: int = Field(default=720, gt=0)  # operational safe default
     cv_weights_ref: str = "cv_weights_v1"                 # key NAME in the private file, not values
     cv_max_raw_cal_divergence: float | None = Field(default=None, gt=0.0, le=1.0)
@@ -369,6 +373,8 @@ _cache_lock = threading.RLock()
 _cache_token: tuple[bool, str, str, int, int, int] | None = None
 # PR-016b: values of the private file's `refs:` section (never logged).
 _private_refs: dict[str, Any] = {}
+# The `assurance:` section of the private file (never logged).
+_private_assurance: dict[str, Any] = {}
 
 
 def _secrets_path() -> Path:
@@ -513,6 +519,11 @@ def _unknown_prefixed_env_vars() -> list[str]:
     is explicit here. Returns NAMES only.
     """
     known = {env_name(f).upper() for f in DagSettings.model_fields}
+    if any(k.upper().startswith(CV_ENV_PREFIX) for k in os.environ):
+        # Lazy: the vector modules load only when a vector variable is present.
+        from graqle.assurance.cv_settings import cv_env_names
+
+        known |= cv_env_names()
     return sorted(
         k for k in os.environ
         if k.upper().startswith(ENV_PREFIX) and k.upper() not in known
@@ -550,7 +561,7 @@ def load_dag_settings(*, force: bool = False) -> DagSettings:
 def _load_dag_settings_unlocked(
     flag: bool, key: tuple[bool, str, str, int, int, int]
 ) -> DagSettings:
-    global _cache, _provenance, _cache_token, _private_refs
+    global _cache, _provenance, _cache_token, _private_refs, _private_assurance
 
     unknown = _unknown_prefixed_env_vars()
     if unknown:
@@ -565,6 +576,11 @@ def _load_dag_settings_unlocked(
     refs = file_values.pop("refs", None) or {}
     if not isinstance(refs, dict) or not all(isinstance(k, str) for k in refs):
         raise ConfigurationError("DAG private config: 'refs' must be a mapping of names to values")
+    # `assurance:` is the second reserved section: `assurance.confidence_vector.*`
+    # mirrors the GRAQLE_DAG_CV_* variables (read by load_confidence_vector_settings).
+    assurance = file_values.pop("assurance", None) or {}
+    if not isinstance(assurance, dict):
+        raise ConfigurationError("DAG private config: 'assurance' must be a mapping")
     if "enabled" in file_values:
         raise ConfigurationError(
             f"{ENV_FLAG} is environment-only; remove 'enabled' from the DAG private config"
@@ -611,6 +627,7 @@ def _load_dag_settings_unlocked(
 
     _provenance = provenance
     _private_refs = dict(refs)
+    _private_assurance = dict(assurance)
     _cache = settings
     _cache_token = key
     logger.info(
@@ -624,12 +641,13 @@ def _load_dag_settings_unlocked(
 
 def reset_dag_settings_cache() -> None:
     """Drop the cached settings, token and provenance (tests, ``graq serve`` reload)."""
-    global _cache, _provenance, _cache_token, _private_refs
+    global _cache, _provenance, _cache_token, _private_refs, _private_assurance
     with _cache_lock:
         _cache = None
         _cache_token = None
         _provenance = {}
         _private_refs = {}
+        _private_assurance = {}
 
 
 def resolve_private_ref(name: str) -> Any:
@@ -777,3 +795,21 @@ def validate_flag_consistency(cfg: Any) -> None:
             __version__,
             config_version(settings)[:23],
         )
+
+
+# Lazy re-exports: the confidence-vector settings live in ``cv_settings`` so that
+# importing this module never loads the vector (flag-off isolation).
+_CV_EXPORTS = frozenset({
+    "SOURCE_CLASSES",
+    "BootstrapSettings",
+    "ConfidenceVectorSettings",
+    "load_confidence_vector_settings",
+})
+
+
+def __getattr__(name: str) -> Any:
+    if name in _CV_EXPORTS:
+        from graqle.assurance import cv_settings
+
+        return getattr(cv_settings, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
