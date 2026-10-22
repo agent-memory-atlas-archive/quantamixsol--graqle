@@ -6,6 +6,7 @@ Thresholds are the TEST SUBSTITUTES already used by ``test_settings.py``
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -22,6 +23,15 @@ SUBSTITUTE_SETTINGS: dict[str, Any] = {
     "hg05_poisoning_threshold": HG05_SUB,
     "hg07_materiality_threshold": HG07_SUB,
 }
+
+
+def leaks(secret: float, text: str) -> bool:
+    """True if ``repr(secret)`` occurs in ``text`` as a whole numeric token.
+
+    A bare substring test false-positives on unrelated digits (e.g. 0.31 inside
+    a measured ``duration_ms=0.3131...``), which made the leak guards flaky.
+    """
+    return re.search(rf"(?<![\d.]){re.escape(repr(secret))}(?![\d])", text) is not None
 
 
 def make_settings(**overrides: Any) -> DagSettings:
