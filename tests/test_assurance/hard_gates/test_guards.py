@@ -15,7 +15,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 #: means a CR-013 PR touched a file its spec declares untouched (AC-21). Update
 #: only in a PR whose own CR is allowed to change that file.
 PROTECTED: dict[str, str] = {
-    "graqle/core/rbac.py": "62b8ca5f5cacc1fd8974b338424c252768b18c720c5e98921c66d6042d0686a8",
+    # Re-pinned by CR-015 PR-015c, the CR that owns the DAG-ESCALATE rbac tier edit.
+    "graqle/core/rbac.py": "ec9acbdd4869ac3e3400319f3e41e62b0b59122af5fefe449ddd1b98c3a37b0d",
     "graqle/intelligence/governance/drace.py": "77b91ba7acc9abc620a6ee134ba1116b5fe0b99e93e355f8867df598dbdb0406",  # noqa: E501
     # Re-pinned by CR-015 PR-015b, the CR that owns the check() dispatcher edit.
     "graqle/core/governance.py": "f4960b4e459d8dc4326d65767dd5050815f48d86dfce32950b1dcbb993aa5df5",

@@ -21,12 +21,16 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 
 from graqle.assurance.settings import ENV_FLAG, is_dag_enabled
 from graqle.cli.console import create_console
 from graqle.config.exceptions import ConfigurationError
+
+if TYPE_CHECKING:  # annotation only: keeps the escalation modules out of the flag-off import graph
+    from graqle.assurance.escalation import JsonlEscalationQueue
 
 console = create_console()
 
@@ -83,4 +87,111 @@ def threshold_study_command(
         raise typer.Exit(2) from None
 
     console.print(f"[green]Report written:[/green] {report_path}")
+    raise typer.Exit(0)
+
+
+escalations_app = typer.Typer(
+    name="escalations",
+    help="Review packages escalated by the DAG gate (flag-guarded).",
+)
+assurance_app.add_typer(escalations_app, name="escalations")
+
+
+def _open_escalation_queue() -> JsonlEscalationQueue:
+    """Return the configured escalation queue, or exit non-zero (fail closed).
+
+    Only the file-backed queue is reachable from a separate process; ``memory`` and
+    ``custom`` queues live inside the host application, so they are refused here.
+    """
+    if not is_dag_enabled():
+        console.print(
+            f"[bold red]{ENV_FLAG} is not set[/bold red] -- "
+            "`graq assurance escalations` is flag-gated off."
+        )
+        raise typer.Exit(3)
+
+    # Lazy: the escalation modules stay out of the flag-off import graph.
+    from graqle.assurance.escalation import JsonlEscalationQueue
+    from graqle.assurance.escalation_settings import EscalationSettings
+
+    try:
+        settings = EscalationSettings.from_env()
+    except ConfigurationError as exc:
+        console.print(f"[bold red]Invalid escalation configuration:[/bold red] {exc}")
+        raise typer.Exit(2) from None
+    if settings.queue != "jsonl":
+        console.print(
+            f"[bold red]Escalation queue {settings.queue!r} is not reachable from the CLI;[/bold red] "
+            "only the 'jsonl' queue is supported."
+        )
+        raise typer.Exit(2)
+    return JsonlEscalationQueue(settings.queue_path)
+
+
+@escalations_app.callback()
+def _escalations_callback() -> None:
+    """Review packages escalated by the DAG gate (flag-guarded)."""
+
+
+@escalations_app.command("list")
+def escalations_list_command(
+    role: str = typer.Option("", "--role", help="Only packages routed to this role."),
+) -> None:
+    """List open and acknowledged review packages."""
+    queue = _open_escalation_queue()
+    try:
+        packages = queue.list_open(role or None)
+    except (OSError, ValueError) as exc:
+        console.print(f"[bold red]Escalation queue unreadable:[/bold red] {type(exc).__name__}")
+        raise typer.Exit(2) from None
+    for pkg in packages:
+        console.print(
+            f"{pkg.package_id}  {pkg.status}  tier={pkg.impact_tier.value}  "
+            f"role={pkg.route_to_role}  requested={pkg.requested_decision}"
+        )
+    raise typer.Exit(0)
+
+
+@escalations_app.command("ack")
+def escalations_ack_command(
+    package_id: str = typer.Argument(..., help="Review package id."),
+    actor: str = typer.Option(..., "--actor", help="Acknowledging actor id (must be eligible)."),
+) -> None:
+    """Acknowledge an open review package."""
+    queue = _open_escalation_queue()
+    try:
+        done = queue.ack(package_id, actor)
+    except (OSError, ValueError) as exc:
+        console.print(f"[bold red]Escalation queue failed:[/bold red] {type(exc).__name__}")
+        raise typer.Exit(2) from None
+    if not done:
+        console.print("[bold red]Acknowledge refused:[/bold red] unknown, closed or ineligible.")
+        raise typer.Exit(1)
+    console.print(f"[green]Acknowledged:[/green] {package_id}")
+    raise typer.Exit(0)
+
+
+@escalations_app.command("resolve")
+def escalations_resolve_command(
+    package_id: str = typer.Argument(..., help="Review package id."),
+    actor: str = typer.Option(..., "--actor", help="Resolving actor id (must be eligible)."),
+    decision: str = typer.Option(
+        ..., "--decision", help="approve_execute | approve_replan | reject | defer."
+    ),
+    justification: str = typer.Option(..., "--justification", help="Why (required, non-empty)."),
+) -> None:
+    """Resolve a review package with a decision and a justification."""
+    queue = _open_escalation_queue()
+    try:
+        done = queue.resolve(package_id, actor, decision, justification)
+    except (OSError, ValueError) as exc:
+        console.print(f"[bold red]Escalation queue failed:[/bold red] {type(exc).__name__}")
+        raise typer.Exit(2) from None
+    if not done:
+        console.print(
+            "[bold red]Resolve refused:[/bold red] unknown or closed package, "
+            "ineligible actor, invalid decision or empty justification."
+        )
+        raise typer.Exit(1)
+    console.print(f"[green]Resolved:[/green] {package_id}")
     raise typer.Exit(0)

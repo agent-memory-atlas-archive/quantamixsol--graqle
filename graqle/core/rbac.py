@@ -59,14 +59,18 @@ from typing import Optional
 # Role definitions and permission matrix
 # ---------------------------------------------------------------------------
 
+#: Marker permission (not an approval tier): the role may receive DAG escalation
+#: review packages (CR-015). Additive; ``can_approve("T1".."T3")`` is unaffected.
+DAG_ESCALATE_TIER = "DAG-ESCALATE"
+
 #: Mapping from role name → set of tiers the role can approve
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "readonly":     frozenset(),                          # No approval authority
     "developer":    frozenset({"T1"}),                   # Auto-pass only
     "ci_pipeline":  frozenset({"T1"}),                   # Automated, no human approval
-    "senior":       frozenset({"T1", "T2"}),             # Can approve medium-risk
-    "lead":         frozenset({"T1", "T2", "T3"}),       # Can approve high-risk
-    "admin":        frozenset({"T1", "T2", "T3"}),       # Full approval + cap override
+    "senior":       frozenset({"T1", "T2", DAG_ESCALATE_TIER}),        # Can approve medium-risk
+    "lead":         frozenset({"T1", "T2", "T3", DAG_ESCALATE_TIER}),  # Can approve high-risk
+    "admin":        frozenset({"T1", "T2", "T3", DAG_ESCALATE_TIER}),  # Full approval + cap override
 }
 
 #: Default role for unknown actors (conservative — no approval authority)

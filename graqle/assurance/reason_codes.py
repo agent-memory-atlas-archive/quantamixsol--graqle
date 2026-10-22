@@ -386,6 +386,21 @@ _SEED: tuple[ReasonCode, ...] = (
         "The human-oversight threshold is a placeholder; a human must review.",
         "0.86.0",
     ),
+    # Escalation routing (CR-015 PR-015c)
+    ReasonCode(
+        "DAG-TR-009-ESCALATION_QUEUE_UNAVAILABLE",
+        Severity.WARN,
+        "RT",
+        "The escalation queue was unreachable; the package was written to the local fallback.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-TR-011-RBAC_UNAVAILABLE",
+        Severity.WARN,
+        "RT",
+        "Reviewer eligibility could not be resolved; the package was routed to the administrator role.",
+        "0.86.0",
+    ),
     ReasonCode(
         "DAG-TR-010-EVALUATION_ERROR",
         Severity.FAIL,
