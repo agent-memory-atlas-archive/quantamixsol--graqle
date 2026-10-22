@@ -34,11 +34,78 @@ from typing import Any
 __all__ = ["inputs_hash", "sorted_ids", "sorted_records"]
 
 
+_SCALARS = frozenset({str, bool, type(None)})
+_JSON_ENCODE = json.JSONEncoder(sort_keys=True, separators=(",", ":"), allow_nan=False).encode
+
+
+_SCALARS_AND_FLOAT = _SCALARS | {float}
+
+
+def _plain_float(x: float) -> bool:
+    """Finite, non-integral float whose ``repr`` is plain decimal.
+
+    For these the Python ``repr`` and the ECMAScript number text of RFC 8785
+    coincide; integral values (``1.0`` vs ``1``), exponent forms, ``-0.0`` and
+    non-finite values go to the full canonicaliser.
+    """
+    r = repr(x)
+    return "e" not in r and "n" not in r and not r.endswith(".0")
+
+
+def _simple_tree(obj: Any) -> bool:
+    """True when ``obj`` holds only exact dict(str keys)/list/str/bool/None/float nodes.
+
+    Anything else (tuples, numbers, subclasses, non-str keys) is left to the
+    full canonicaliser, which validates or rejects it.
+    """
+    stack = [obj]
+    while stack:
+        node = stack.pop()
+        if type(node) is list:
+            kinds = set(map(type, node))
+            if kinds <= _SCALARS:
+                continue
+            if kinds <= _SCALARS_AND_FLOAT:
+                if all(_plain_float(x) for x in node if type(x) is float):
+                    continue
+                return False
+            stack.extend(node)
+        elif type(node) is dict:
+            if not set(map(type, node)) <= {str}:
+                return False
+            stack.extend(node.values())
+        elif type(node) is float:
+            if not _plain_float(node):
+                return False
+        elif type(node) not in _SCALARS:
+            return False
+    return True
+
+
+def _fast_canon(projection: dict[str, Any]) -> bytes | None:
+    """JCS bytes for a simple, escape-free projection, else ``None``.
+
+    With only str/bool/None leaves and no character needing an escape (the
+    ASCII-escaped output holds no backslash), the C JSON encoder emits exactly
+    the RFC 8785 bytes: same separators, same key order (ASCII code points
+    equal UTF-16 code units), same literals.
+    """
+    if not _simple_tree(projection):
+        return None
+    text = _JSON_ENCODE(projection)
+    if "\\" in text or not text.isascii():
+        return None
+    return text.encode("ascii")
+
+
 def inputs_hash(projection: dict[str, Any]) -> str:
     """``"sha256:<hex>"`` over the JCS-canonical bytes of ``projection``."""
-    from graqle.governance.tamper_evidence.canonicalize import canon  # lazy
+    data = _fast_canon(projection)
+    if data is None:
+        from graqle.governance.tamper_evidence.canonicalize import canon  # lazy
 
-    return "sha256:" + hashlib.sha256(canon(projection)).hexdigest()
+        data = canon(projection)
+    return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
 def sorted_ids(values: Iterable[str]) -> list[str]:
