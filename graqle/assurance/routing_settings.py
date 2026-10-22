@@ -15,7 +15,7 @@ from __future__ import annotations
 # module: graqle.assurance.routing_settings
 # risk: LOW (impact radius: 0 existing callers -- consumed by CR-015b gate/adapter)
 # dependencies: math, os, pydantic, graqle.assurance.gate, graqle.assurance.settings
-# constraints: never imported by graqle.governance.*; no trade-secret value
+# constraints: never imported by graqle.governance.*; no configured value
 # -- /graqle:intelligence --
 import math
 import os

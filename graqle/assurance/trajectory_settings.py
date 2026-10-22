@@ -14,7 +14,7 @@ from __future__ import annotations
 # module: graqle.assurance.trajectory_settings
 # risk: LOW (impact radius: 0 existing callers -- consumed by CR-015a estimators)
 # dependencies: pydantic, graqle.assurance.settings, graqle.assurance.estimators (lazy)
-# constraints: never imported by graqle.governance.*; no trade-secret value
+# constraints: never imported by graqle.governance.*; no configured value
 # -- /graqle:intelligence --
 from pathlib import Path
 

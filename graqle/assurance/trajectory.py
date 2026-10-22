@@ -11,7 +11,7 @@ may only ever see the prefix ``cp_0 .. cp_t`` (the no-post-outcome rule, charter
 ``HistoryView`` must never gain an accessor that can reach beyond ``t``; any
 change to it is a Research-Team review item (the AC-3 test is the guard).
 
-Trade-secret rule (CR-015 §12): this module holds no threshold, weight or
+Configuration rule (CR-015 §12): this module holds no threshold, weight or
 window value. The history window is an argument.
 """
 
@@ -23,7 +23,7 @@ from __future__ import annotations
 # dependencies: hashlib, pydantic, graqle.assurance.outcomes,
 #   graqle.governance.tamper_evidence.canonicalize (lazy)
 # constraints: never imported by graqle.governance.*; HistoryView exposes
-#   nothing beyond step t; no numeric literal for any trade-secret symbol
+#   nothing beyond step t; no numeric literal for any configured symbol
 # -- /graqle:intelligence --
 import hashlib
 from typing import TYPE_CHECKING, Any

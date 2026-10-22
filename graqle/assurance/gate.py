@@ -12,7 +12,7 @@ Fail-closed rules:
   :class:`GateVerdict` validator and a final defensive check both enforce it);
 * a REPLAN with no replan controller wired, or whose controller raises, is ESCALATE.
 
-Trade-secret rule: floors, budgets and the residual-risk combinator arrive through
+Configuration rule: floors, budgets and the residual-risk combinator arrive through
 :class:`~graqle.assurance.routing_settings.RoutingSettings`; no value lives here.
 """
 

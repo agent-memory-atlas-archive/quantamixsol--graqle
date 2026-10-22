@@ -15,7 +15,7 @@ They are the E2 comparison arms and the input of CR-015's
 ``CausalBaselineEstimator``. None of them reads future length, final outcome or
 anything after the checkpoint; CR-015's frozen ``HistoryView`` enforces that.
 
-Trade-secret rule (CR-014 §12): the per-feature maps and the exponents
+Configuration rule (CR-014 §12): the per-feature maps and the exponents
 are PRIVATE. This module contains no values for them and no defaults. They
 arrive as a :class:`CausalBaselineParams` built from private configuration
 (CR-014 PR-014c); its ``repr`` is redacted, and results carry only a keyed

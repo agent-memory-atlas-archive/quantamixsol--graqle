@@ -23,7 +23,7 @@ invalidation fields of ``DependencyNodeRef`` and the CR-018
 those fields are absent. Nothing here is called by ``GovernanceMiddleware``; the gate is
 consumed by ``DecisionAssuranceGate.evaluate()`` (CR-015) only.
 
-Trade-secret rule (CR-013 §12): thresholds reach a gate only through a frozen
+Configuration rule (CR-013 §12): thresholds reach a gate only through a frozen
 :class:`~graqle.assurance.settings.DagSettings`. No threshold value is ever
 projected, hashed in clear, logged, or placed in an error string.
 """

@@ -9,7 +9,7 @@ Fail-closed rules:
 * a missing deployment salt is a ``ConfigurationError`` at construction, not at
   the first estimate.
 
-Trade-secret rule (CR-015 §12): the baseline maps and exponents are private and
+Configuration rule (CR-015 §12): the baseline maps and exponents are private and
 arrive in ``EstimatorDeps.baseline_params``; nothing here carries a value.
 """
 

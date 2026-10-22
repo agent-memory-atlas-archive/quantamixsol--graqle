@@ -16,7 +16,7 @@ Semantics (CR-012 §2.1):
   :class:`ConfigurationError` at the first load. There is no placeholder
   fallback for a security-critical value.
 
-Trade-secret rule (CR-012 §12, brief §13): every threshold, cap, weight,
+Configuration rule (CR-012 §12, brief §13): every threshold, cap, weight,
 half-life, retry budget and window is a SYMBOL here. The only numeric literals
 in this file are non-zero *operational* safe defaults (timeouts, TTL, SLA,
 depth, key max age, bench seed), which brief §13.2 permits. Gate thresholds and
