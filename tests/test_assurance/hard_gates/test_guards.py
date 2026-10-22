@@ -17,7 +17,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 PROTECTED: dict[str, str] = {
     "graqle/core/rbac.py": "62b8ca5f5cacc1fd8974b338424c252768b18c720c5e98921c66d6042d0686a8",
     "graqle/intelligence/governance/drace.py": "77b91ba7acc9abc620a6ee134ba1116b5fe0b99e93e355f8867df598dbdb0406",  # noqa: E501
-    "graqle/core/governance.py": "0d3f57757b7867fc64173fbab52c6c33081a0aeea5019c4d992f3745b3f3d1d6",
+    # Re-pinned by CR-015 PR-015b, the CR that owns the check() dispatcher edit.
+    "graqle/core/governance.py": "f4960b4e459d8dc4326d65767dd5050815f48d86dfce32950b1dcbb993aa5df5",
 }
 
 
