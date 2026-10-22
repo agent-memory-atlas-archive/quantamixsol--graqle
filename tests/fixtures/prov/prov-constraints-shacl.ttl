@@ -1,0 +1,44 @@
+# SHACL port of the structural PROV constraints that apply to the graph shapes
+# graqle.ontology.prov_export emits (W3C PROV-CONSTRAINTS: entity-activity
+# disjointness, typing of the arguments of used / wasGeneratedBy /
+# wasInvalidatedBy / wasDerivedFrom / wasRevisionOf / wasAssociatedWith, and the
+# xsd:dateTime typing of start times). Authored for this repository; it is a
+# subset port, not the full W3C constraint set.
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix ex: <urn:graqle:test:prov-constraints#> .
+
+ex:EntityActivityDisjoint a sh:NodeShape ;
+    sh:targetClass prov:Entity ;
+    sh:not [ sh:class prov:Activity ] .
+
+ex:ActivityShape a sh:NodeShape ;
+    sh:targetClass prov:Activity ;
+    sh:property [ sh:path prov:startedAtTime ; sh:maxCount 1 ; sh:datatype xsd:dateTime ] ;
+    sh:property [ sh:path prov:wasAssociatedWith ; sh:class prov:Agent ] ;
+    sh:property [ sh:path prov:used ; sh:class prov:Entity ] .
+
+ex:UsedSubject a sh:NodeShape ;
+    sh:targetSubjectsOf prov:used ;
+    sh:class prov:Activity .
+
+ex:GeneratedShape a sh:NodeShape ;
+    sh:targetSubjectsOf prov:wasGeneratedBy ;
+    sh:class prov:Entity ;
+    sh:property [ sh:path prov:wasGeneratedBy ; sh:class prov:Activity ] .
+
+ex:InvalidatedShape a sh:NodeShape ;
+    sh:targetSubjectsOf prov:wasInvalidatedBy ;
+    sh:class prov:Entity ;
+    sh:property [ sh:path prov:wasInvalidatedBy ; sh:class prov:Activity ] .
+
+ex:DerivedShape a sh:NodeShape ;
+    sh:targetSubjectsOf prov:wasDerivedFrom ;
+    sh:class prov:Entity ;
+    sh:property [ sh:path prov:wasDerivedFrom ; sh:class prov:Entity ] .
+
+ex:RevisionShape a sh:NodeShape ;
+    sh:targetSubjectsOf prov:wasRevisionOf ;
+    sh:class prov:Entity ;
+    sh:property [ sh:path prov:wasRevisionOf ; sh:class prov:Entity ] .
