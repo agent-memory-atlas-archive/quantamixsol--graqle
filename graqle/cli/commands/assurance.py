@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import typer
 
@@ -84,6 +84,69 @@ def threshold_study_command(
         raise typer.Exit(2) from None
     except (DatasetError, ValueError) as exc:
         console.print(f"[bold red]Threshold study refused:[/bold red] {exc}")
+        raise typer.Exit(2) from None
+
+    console.print(f"[green]Report written:[/green] {report_path}")
+    raise typer.Exit(0)
+
+
+@assurance_app.command("intervention-study")
+def intervention_study_command(
+    tasks: Path = typer.Option(
+        ...,
+        "--tasks",
+        exists=True,
+        dir_okay=False,
+        help="Synthetic tasks, one JSON object per line.",
+    ),
+    params: Path = typer.Option(
+        ...,
+        "--params",
+        exists=True,
+        dir_okay=False,
+        help="Study parameters as a JSON object (every field required).",
+    ),
+    out: Path = typer.Option(..., "--out", file_okay=False, help="Directory for the report files."),
+    run_id: str = typer.Option("", "--run-id", help="Run id (default: derived from the tasks)."),
+) -> None:
+    """Run the E7 intervention study and write the report.
+
+    Uses the merged REPLAN controller when it is importable; otherwise a stub, and the
+    report is then labelled as a dev/practice run (never an E7 result).
+    """
+    if not is_dag_enabled():
+        console.print(
+            f"[bold red]{ENV_FLAG} is not set[/bold red] -- "
+            "`graq assurance intervention-study` is flag-gated off."
+        )
+        raise typer.Exit(3)
+
+    import json
+
+    from pydantic import ValidationError
+
+    from graqle.assurance.intervention_study import (
+        DatasetError,
+        StubReplanController,
+        StudyParams,
+        run_intervention_study,
+    )
+
+    try:
+        from graqle.assurance import replan as replan_module
+
+        factory: Any = replan_module.ReplanController
+    except (ImportError, AttributeError):
+        factory = StubReplanController
+        console.print("[yellow]Real ReplanController missing: stub run, NOT an E7 result.[/yellow]")
+
+    if not run_id:
+        run_id = "run-" + hashlib.sha256(tasks.read_bytes()).hexdigest()[:12]
+    try:
+        study_params = StudyParams.model_validate(json.loads(params.read_text(encoding="utf-8")))
+        report_path = run_intervention_study(tasks, out, study_params, run_id, factory)
+    except (OSError, json.JSONDecodeError, ValidationError, DatasetError, ValueError) as exc:
+        console.print(f"[bold red]Intervention study refused:[/bold red] {exc}")
         raise typer.Exit(2) from None
 
     console.print(f"[green]Report written:[/green] {report_path}")
