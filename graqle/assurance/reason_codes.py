@@ -234,6 +234,86 @@ _SEED: tuple[ReasonCode, ...] = (
         "A confidence dimension could not be computed (missing data).",
         "0.85.0",
     ),
+    # CR-014 PR-014b: numbered confidence-vector codes (spec section 5.1). Severity is
+    # static per code, so a code that is FAIL only for mandatory dimensions is
+    # registered at its stricter level (fail closed).
+    ReasonCode(
+        "DAG-CV-001-DIM_NOT_AVAILABLE",
+        Severity.FAIL,
+        "CV-DIM",
+        "A confidence dimension has no instrumentation; configure its provider.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-002-CALIBRATION_STALE",
+        Severity.WARN,
+        "CV-CAL",
+        "Calibration record is older than its time-to-live; refit the calibrator.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-003-DIVERGENCE_EXCEEDED",
+        Severity.WARN,
+        "CV-CAL",
+        "Calibrated value departs from raw beyond the bound; calibrated value withheld.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-004-PROJECTION_SKIPPED_HG_FAIL",
+        Severity.INFO,
+        "CV-PROJ",
+        "Projection skipped because a hard gate failed.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-004-GENERATOR_CORRELATED",
+        Severity.INFO,
+        "CV-COR",
+        "Evidence from a shared generator was counted once for corroboration.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-005-BELOW_POLICY_THRESHOLD",
+        Severity.FAIL,
+        "CV-PROJ",
+        "Decision score is below the class policy threshold; route to hold.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-006-CALIBRATOR_VERSION_UNKNOWN",
+        Severity.FAIL,
+        "CV-CAL",
+        "Calibrator version is unknown to the registry; register or refit it.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-007-PROVIDER_ERROR",
+        Severity.FAIL,
+        "CV-DIM",
+        "A dimension provider raised; the dimension is unavailable (fail closed).",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-008-CONFIG_INVALID",
+        Severity.CRITICAL,
+        "CV-CFG",
+        "Confidence-vector configuration is invalid; fix the named setting.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-009-SOURCE_INDEPENDENCE_UNRESOLVED",
+        Severity.WARN,
+        "CV-COR",
+        "Source identity is missing for some evidence; independence is under-determined.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-010-CRITICAL_CAP_APPLIED",
+        Severity.INFO,
+        "CV-PROJ",
+        "The critical-failure cap bounded the decision score.",
+        "0.85.0",
+    ),
     # Trajectory (CR-015)
     ReasonCode(
         "DAG-TR-RELIABILITY_LOW",
