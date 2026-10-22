@@ -57,7 +57,6 @@ from graqle.cli.commands.compliance import compliance_app
 from graqle.cli.commands.attest import attest_app
 from graqle.cli.commands.pct import pct_app
 from graqle.cli.commands.neo4j_import import neo4j_import_cmd
-from graqle.cli.commands.dag import dag_app
 from graqle.cli.commands.assurance import assurance_app
 from graqle.assurance.settings import is_dag_enabled
 from graqle.cli.commands.govern_serve import govern_app
@@ -147,13 +146,10 @@ app.add_typer(compliance_app, name="compliance")
 app.add_typer(pct_app, name="pct")
 app.add_typer(attest_app, name="attest")
 app.command(name="neo4j-import")(neo4j_import_cmd)
-# PR #390 gate finding (B-2, ALWAYS-9): only register the `dag` typer app
-# when the feature is enabled, so `graq --help` and the CLI surface are
-# byte-identical with the flag off. The flag is a pure env read
-# (`is_dag_enabled()`), so this is decided once at import time, matching
-# the `dag` command's own flag check (graqle/cli/commands/dag.py:80).
+# ALWAYS-9: only register the `assurance` typer app when the feature is
+# enabled, so `graq --help` is byte-identical with the flag off. The flag is
+# a pure env read (`is_dag_enabled()`), decided once at import time.
 if is_dag_enabled():
-    app.add_typer(dag_app, name="dag")
     app.add_typer(assurance_app, name="assurance")
 app.add_typer(compile_command, name="compile")
 app.add_typer(verify_command, name="verify")
