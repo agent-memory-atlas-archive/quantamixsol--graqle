@@ -45,6 +45,7 @@ def conformant_graph() -> dict[str, Any]:
             "cl",
             "Claim",
             claim_id="cl",
+            canonical_id="cid-cl",  # PR-016b rule (c): ordered-edge participants
             subject="s",
             predicate="p",
             object="o",
@@ -57,6 +58,7 @@ def conformant_graph() -> dict[str, Any]:
             "cl2",
             "Claim",
             claim_id="cl2",
+            canonical_id="cid-cl2",  # PR-016b rule (c): ordered-edge participants
             subject="s2",
             predicate="p",
             object="o",

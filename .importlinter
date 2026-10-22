@@ -27,3 +27,11 @@ forbidden_modules =
 # this contract catches any EAGER, module-level import.
 ignore_imports =
     graqle.config.settings -> graqle.assurance.settings
+    # CR-016 PR-016b: the assurance write path (governance.tamper_evidence ->
+    # ontology.assurance_ops -> ontology.assurance) reaches these two edges.
+    # Both are lazy, inside register_assurance_ontology() only; importing the
+    # write path loads no graqle.assurance module, which
+    # test_import_direction.py::test_assurance_write_path_does_not_load_assurance
+    # proves at runtime.
+    graqle.ontology.assurance -> graqle.assurance.settings
+    graqle.ontology.assurance -> graqle.assurance._hashing

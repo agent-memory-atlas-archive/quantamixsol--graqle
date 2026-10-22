@@ -34,6 +34,7 @@ Design notes:
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from graqle.governance.tamper_evidence.errors import TamperEvidenceError
@@ -41,6 +42,8 @@ from graqle.governance.tamper_evidence.errors import TamperEvidenceError
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from graqle.connectors.neo4j import Neo4jConnector
     from graqle.governance.tamper_evidence.committer import BatchCommit
+    from graqle.ontology.assurance_integrity import IntegrityKeyring
+    from graqle.ontology.assurance_ops import AssuranceOp
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +56,22 @@ class KgPersistError(TamperEvidenceError):
     not yet anchored). Wrapping driver errors in this type makes the failure mode
     explicit and keeps the tamper-evidence error hierarchy uniform.
     """
+
+
+class AssuranceWriteRefusedError(KgPersistError):
+    """An assurance write was refused on purpose; retrying it cannot succeed.
+
+    Raised for a rule violation (write-once field changed, ordering rule (d),
+    missing ``canonical_id``, a missing endpoint) and for a DB constraint
+    rejection (duplicate version, a second SUPERSEDES/CORRECTS in or out).
+    Distinct from a transient :class:`KgPersistError` so a caller never retries
+    a write that would corrupt the assurance graph.
+    """
+
+
+def _is_constraint_rejection(exc: BaseException) -> bool:
+    code = str(getattr(exc, "code", "") or "")
+    return type(exc).__name__ == "ConstraintError" or code.endswith("ConstraintValidationFailed")
 
 
 def batch_commit_to_props(batch: "BatchCommit") -> dict[str, Any]:
@@ -121,10 +140,66 @@ class Neo4jBatchPersister:
         ensure.
     """
 
-    def __init__(self, connector: "Neo4jConnector", ensure_schema: bool = True) -> None:
+    def __init__(
+        self,
+        connector: "Neo4jConnector",
+        ensure_schema: bool = True,
+        integrity_keyring: IntegrityKeyring | None = None,
+    ) -> None:
         self._connector = connector
         self._ensure_schema = ensure_schema
         self._schema_ready = False
+        self._keyring = integrity_keyring
+
+    @property
+    def connector(self) -> Neo4jConnector:
+        return self._connector
+
+    # ── DAG-2026 CR-016 PR-016b: the assurance write path ─────────────────
+
+    def persist_assurance_ops(self, ops: Sequence[AssuranceOp]) -> None:
+        """Apply assurance ops in ONE write transaction (CR-016 §3.2).
+
+        The only SDK path that writes assurance write-once fields or creates
+        SUPERSEDES/CORRECTS edges. Raises :class:`AssuranceWriteRefusedError` for a
+        rule or constraint violation (never retry) and :class:`KgPersistError`
+        for anything else. Without an integrity keyring nothing is written:
+        an unsigned write would look like tampering to the verifier.
+        """
+        if self._keyring is None:
+            raise KgPersistError(
+                "persist_assurance_ops needs an integrity keyring; nothing written"
+            )
+        if not ops:
+            return
+        try:
+            # lazy: the private write path
+            from graqle.governance.tamper_evidence import _assurance_write
+
+            _assurance_write.write_ops(
+                self._connector._get_driver(), self._connector.database, list(ops), self._keyring
+            )
+        except KgPersistError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - wrap-and-propagate by design
+            if _is_constraint_rejection(exc):
+                raise AssuranceWriteRefusedError(
+                    f"DB constraint rejected the assurance write: {exc}"
+                ) from exc
+            logger.error("assurance write failed (%d ops)", len(ops), exc_info=True)
+            raise KgPersistError(f"failed to persist {len(ops)} assurance op(s): {exc}") from exc
+
+    def rollback_assurance_migration(self) -> dict[str, int]:
+        """Undo every MIGRATION event through the private write path (CR-016 §5.3)."""
+        try:
+            # lazy: the private write path
+            from graqle.governance.tamper_evidence import _assurance_write
+
+            return _assurance_write.rollback_migration(
+                self._connector._get_driver(), self._connector.database
+            )
+        except Exception as exc:  # noqa: BLE001 - wrap-and-propagate by design
+            raise KgPersistError(f"assurance migration rollback failed: {exc}") from exc
 
     def __call__(self, batch: "BatchCommit") -> None:
         """Persist ``batch`` to the KG; raise :class:`KgPersistError` on failure.

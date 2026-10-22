@@ -76,6 +76,7 @@ __all__ = [
     "is_dag_enabled",
     "load_dag_settings",
     "reset_dag_settings_cache",
+    "resolve_private_ref",
     "validate_flag_consistency",
 ]
 
@@ -104,6 +105,8 @@ REQUIRED_WHEN_ENABLED: tuple[str, ...] = (
     "circuit_breaker_window",       # CR-015
     "signing_key_id",               # CR-018 (blueprint B3)
     "signing_key_version",          # CR-018 (blueprint B3)
+    "scope_key_fields_ref",         # CR-016 §3.3 (private): ref NAME under `refs:`
+    "merge_priority_ref",           # CR-016 §3.3: ref NAME, or "sdk_default"
 )
 
 #: TS-2/TS-3 valued fields. Their VALUES never enter a log, trace, anchor or
@@ -248,6 +251,21 @@ class DagSettings(BaseSettings):
     prov_export_enabled: bool = False
     propagation_max_depth: int = Field(default=8, gt=0, le=64)  # operational safe default
     recompute_queue_path: str = ".graqle/dag/recompute_queue.jsonl"
+    # PR-016b (CR-016 §3.3). The two refs NAME entries in the private file's
+    # `refs:` section; the values (scope-key fields, merge priority) are private
+    # and are resolved by graqle.ontology.assurance_config, never here.
+    scope_key_fields_ref: str | None = None
+    merge_priority_ref: str | None = None
+    assurance_secondary_labels: bool = True
+    # No public default: the loader in assurance_config fails closed if absent.
+    assurance_label_ceiling: int | None = Field(default=None, gt=0)
+    assurance_migration_batch: int | None = Field(default=None, gt=0)
+    # Integrity-digest keyring (Research ruling 2026-09-28 §1(3)): every digest
+    # is stamped with the version of the key that made it, so a salt rotation
+    # is never mistaken for tampering. The previous pair is the overlap window.
+    assurance_hmac_version: str = "v1"
+    config_salt_previous: SecretStr | None = Field(default=None, repr=False)
+    assurance_hmac_version_previous: str | None = None
 
     # ── CR-018 provenance event + action binding ──────────────────────────
     signing_key_id: str | None = None
@@ -285,7 +303,7 @@ class DagSettings(BaseSettings):
             )
         return value
 
-    @field_validator("config_salt")
+    @field_validator("config_salt", "config_salt_previous")
     @classmethod
     def _salt_long_enough(cls, value: SecretStr | None) -> SecretStr | None:
         # PR-339 B1: blank is "absent" (handled by _required_when_enabled); a
@@ -303,6 +321,21 @@ class DagSettings(BaseSettings):
     @model_validator(mode="after")
     def _required_when_enabled(self) -> DagSettings:
         # Read-only: the model is frozen; this validator never assigns.
+        # PR-016b: the previous integrity key is a PAIR (salt + version), and
+        # its version must differ from the current one, or the keyring could
+        # not tell which key signed a digest.
+        prev_salt = not _is_absent(self.config_salt_previous)
+        prev_ver = not _is_absent(self.assurance_hmac_version_previous)
+        if prev_salt != prev_ver:
+            raise ConfigurationError(
+                f"{ENV_PREFIX}CONFIG_SALT_PREVIOUS and "
+                f"{ENV_PREFIX}ASSURANCE_HMAC_VERSION_PREVIOUS must be set together"
+            )
+        if prev_ver and self.assurance_hmac_version_previous == self.assurance_hmac_version:
+            raise ConfigurationError(
+                f"{ENV_PREFIX}ASSURANCE_HMAC_VERSION_PREVIOUS must differ from "
+                f"{ENV_PREFIX}ASSURANCE_HMAC_VERSION"
+            )
         if not self.enabled:
             return self
         # PR-339 M1: "", whitespace and None are all ABSENT.
@@ -334,6 +367,8 @@ _cache_lock = threading.RLock()
 # rename-replacement can preserve both mtime_ns and size (C2). Token of the last
 # successful load:
 _cache_token: tuple[bool, str, str, int, int, int] | None = None
+# PR-016b: values of the private file's `refs:` section (never logged).
+_private_refs: dict[str, Any] = {}
 
 
 def _secrets_path() -> Path:
@@ -515,7 +550,7 @@ def load_dag_settings(*, force: bool = False) -> DagSettings:
 def _load_dag_settings_unlocked(
     flag: bool, key: tuple[bool, str, str, int, int, int]
 ) -> DagSettings:
-    global _cache, _provenance, _cache_token
+    global _cache, _provenance, _cache_token, _private_refs
 
     unknown = _unknown_prefixed_env_vars()
     if unknown:
@@ -525,6 +560,11 @@ def _load_dag_settings_unlocked(
         )
 
     file_values = _load_secrets_file(_secrets_path())
+    # PR-016b: `refs:` is the one reserved non-field section of the private
+    # file. It holds the VALUES that *_ref settings name (CR-016 §3.3; private values).
+    refs = file_values.pop("refs", None) or {}
+    if not isinstance(refs, dict) or not all(isinstance(k, str) for k in refs):
+        raise ConfigurationError("DAG private config: 'refs' must be a mapping of names to values")
     if "enabled" in file_values:
         raise ConfigurationError(
             f"{ENV_FLAG} is environment-only; remove 'enabled' from the DAG private config"
@@ -570,6 +610,7 @@ def _load_dag_settings_unlocked(
     provenance["keying"] = _keying(settings)
 
     _provenance = provenance
+    _private_refs = dict(refs)
     _cache = settings
     _cache_token = key
     logger.info(
@@ -583,11 +624,26 @@ def _load_dag_settings_unlocked(
 
 def reset_dag_settings_cache() -> None:
     """Drop the cached settings, token and provenance (tests, ``graq serve`` reload)."""
-    global _cache, _provenance, _cache_token
+    global _cache, _provenance, _cache_token, _private_refs
     with _cache_lock:
         _cache = None
         _cache_token = None
         _provenance = {}
+        _private_refs = {}
+
+
+def resolve_private_ref(name: str) -> Any:
+    """Return the value stored under ``refs.<name>`` in the private file.
+
+    Loads settings first so the refs are current. Raises
+    :class:`ConfigurationError` naming the ref, never a value, when it is
+    absent (PR-016b, CR-016 §3.3).
+    """
+    load_dag_settings()
+    with _cache_lock:
+        if name not in _private_refs:
+            raise ConfigurationError(f"DAG private config has no refs entry named {name!r}")
+        return _private_refs[name]
 
 
 def config_provenance() -> Mapping[str, str]:
@@ -620,7 +676,7 @@ def _config_version_payload(settings: DagSettings) -> dict[str, Any]:
     dumped = settings.model_dump(mode="json")
     # PR-339 M3: deployment-layout paths never enter the fingerprint; the salt
     # (the KEY) never enters it either. Everything else non-secret is in clear.
-    excluded = SECRET_VALUED_FIELDS | PATH_FIELDS | {"config_salt"}
+    excluded = SECRET_VALUED_FIELDS | PATH_FIELDS | {"config_salt", "config_salt_previous"}
     public = {k: v for k, v in dumped.items() if k not in excluded}
     secret_items = {
         k: dumped[k] for k in sorted(SECRET_VALUED_FIELDS) if dumped.get(k) is not None

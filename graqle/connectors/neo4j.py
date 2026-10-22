@@ -14,17 +14,57 @@ on chunk embeddings for CypherActivation .
 from __future__ import annotations
 
 import logging
+import os
 import re
 from collections import defaultdict
 from datetime import datetime
 from typing import Any
 
+from graqle.config.exceptions import ENV_FLAG
 from graqle.connectors.base import BaseConnector
 
 logger = logging.getLogger("graqle.connectors.neo4j")
 
 
 _VALID_REL_TYPE_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+
+# ── DAG-2026 CR-016 PR-016b ──────────────────────────────────────────────────
+#: Closed allowlist of assurance edge properties ``save()`` passes through
+#: (CR-016 §3.2). Flat primitives only. Edges without ``kind`` never use it,
+#: so their Cypher is byte-identical to before (AC-1).
+_ASSURANCE_EDGE_PROPS: tuple[str, ...] = (
+    "kind",
+    "strength",
+    "scope_key",
+    "asserted_at",
+    "valid_from",
+    "valid_until",
+    "retracted_at",
+    "prov_event_id",
+    "resolution_status",
+    "resolution_event_id",
+    "contradiction_id",
+)
+#: Ordered kinds are created ONLY by Neo4jBatchPersister.persist_assurance_ops;
+#: save() skips them (existing edges are left untouched, never re-written).
+_ORDERED_EDGE_KINDS = frozenset({"SUPERSEDES", "CORRECTS"})
+#: Same positive allowlist as graqle.assurance.settings (CR-012 AC-1).
+_FLAG_TRUTHY = frozenset({"1", "true", "yes", "on"})
+#: Write-once assurance node fields; save() never writes them on a node that
+#: carries ``assurance_type``. Parity with graqle.ontology.assurance_ops is tested.
+_ASSURANCE_WRITE_ONCE = ("assurance_type", "canonical_id", "scope_key", "valid_from", "asserted_at")
+#: Properties only the assurance write path sets.
+_ASSURANCE_RESERVED = frozenset(
+    {
+        "integrity_digest",
+        "integrity_hmac_version",
+        "supersedes_in",
+        "supersedes_out",
+        "corrects_in",
+        "corrects_out",
+        "assurance_filled_fields",
+    }
+)
 
 
 def _sanitise_rel_type(name: Any) -> str:
@@ -140,6 +180,10 @@ class Neo4jConnector(BaseConnector):
     @property
     def uri(self) -> str:
         return self._uri
+
+    @property
+    def database(self) -> str:
+        return self._database
 
     def _get_driver(self):
         if self._driver is None:
@@ -257,6 +301,8 @@ class Neo4jConnector(BaseConnector):
     def save(self, nodes: dict[str, Any], edges: dict[str, Any]) -> None:
         """Batch write nodes and edges to Neo4j using UNWIND."""
         driver = self._get_driver()
+        skipped_ordered = 0
+        stripped_nodes = 0
 
         # Prepare node data
         node_rows = []
@@ -269,8 +315,18 @@ class Neo4jConnector(BaseConnector):
             }
             # Flatten simple properties (strings/numbers only)
             props = data.get("properties", {})
+            # CR-016 PR-016b: save() is not an assurance write path. It never
+            # writes the write-once fields of an assurance node, nor the
+            # properties only the write path sets; existing values are kept
+            # because ``SET n += row`` does not remove absent keys.
+            skip: frozenset[str] | set[str] = _ASSURANCE_RESERVED
+            if "assurance_type" in props:
+                skip = _ASSURANCE_RESERVED | set(_ASSURANCE_WRITE_ONCE)
+                stripped_nodes += 1
             for k, v in props.items():
                 if k not in ("id", "label", "entity_type", "description", "chunks"):
+                    if k in skip:
+                        continue
                     if isinstance(v, (str, int, float, bool)):
                         row[k] = v
             node_rows.append(row)
@@ -278,13 +334,38 @@ class Neo4jConnector(BaseConnector):
         # Prepare edge data
         edge_rows = []
         for eid, data in edges.items():
-            edge_rows.append({
+            row = {
                 "id": eid,
                 "source": str(data["source"]),
                 "target": str(data["target"]),
                 "relationship": data.get("relationship", "RELATED_TO"),
                 "weight": data.get("weight", 1.0),
-            })
+            }
+            # CR-016 PR-016b: closed allowlist pass-through, only for edges that
+            # carry an assurance ``kind``.
+            eprops = data.get("properties") or {}
+            kind = data.get("kind", eprops.get("kind"))
+            if kind is not None:
+                if str(kind) in _ORDERED_EDGE_KINDS:
+                    skipped_ordered += 1
+                    continue
+                merged = {**eprops, **{k: data[k] for k in _ASSURANCE_EDGE_PROPS if k in data}}
+                row["props"] = {
+                    k: merged[k]
+                    for k in _ASSURANCE_EDGE_PROPS
+                    if k in merged and isinstance(merged[k], (str, int, float, bool))
+                }
+            edge_rows.append(row)
+        if skipped_ordered:
+            logger.warning(
+                "save() skipped %d SUPERSEDES/CORRECTS edge(s): they are written only "
+                "through Neo4jBatchPersister.persist_assurance_ops",
+                skipped_ordered,
+            )
+        if stripped_nodes:
+            logger.debug(
+                "save() left write-once fields untouched on %d assurance node(s)", stripped_nodes
+            )
 
         with driver.session(database=self._database) as session:
             # Batch UNWIND nodes
@@ -306,10 +387,11 @@ class Neo4jConnector(BaseConnector):
             rel_type_count = 0
             if edge_rows:
                 by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+                with_kind: dict[str, list[dict[str, Any]]] = defaultdict(list)
                 for row in edge_rows:
                     rtype = _sanitise_rel_type(row.get("relationship"))
-                    by_type[rtype].append(row)
-                rel_type_count = len(by_type)
+                    (with_kind if "props" in row else by_type)[rtype].append(row)
+                rel_type_count = len(set(by_type) | set(with_kind))
                 for rtype, rows in by_type.items():
                     session.run(
                         f"UNWIND $rows AS row "
@@ -318,6 +400,20 @@ class Neo4jConnector(BaseConnector):
                         f"MERGE (a)-[r:{rtype} {{id: row.id}}]->(b) "
                         f"SET r.relationship = row.relationship, "
                         f"    r.weight = row.weight",
+                        rows=rows,
+                    )
+                # CR-016 PR-016b: edges carrying an assurance kind get the
+                # allowlisted properties too. A separate statement, so edges
+                # without a kind keep their exact Cypher (AC-1 golden).
+                for rtype, rows in with_kind.items():
+                    session.run(
+                        f"UNWIND $rows AS row "
+                        f"MATCH (a:CogniNode {{id: row.source}}) "
+                        f"MATCH (b:CogniNode {{id: row.target}}) "
+                        f"MERGE (a)-[r:{rtype} {{id: row.id}}]->(b) "
+                        f"SET r.relationship = row.relationship, "
+                        f"    r.weight = row.weight, "
+                        f"    r += row.props",
                         rows=rows,
                     )
 
@@ -432,6 +528,87 @@ class Neo4jConnector(BaseConnector):
             self._vector_index_name,
             self._embedding_dimension,
         )
+
+        # CR-016 PR-016b: the assurance schema exists only with the DAG flag on,
+        # so flag off issues exactly the statements above (AC-1).
+        if os.environ.get(ENV_FLAG, "").strip().lower() in _FLAG_TRUTHY:
+            self.create_assurance_schema()
+
+    # --- DAG-2026 CR-016 PR-016b: assurance schema, labels and reads ---
+
+    def create_assurance_schema(self) -> None:
+        """Create the assurance indexes and the DB constraints (idempotent).
+
+        Constraints (measured on Neo4j Community Edition 2026.02.2): composite
+        node uniqueness on ``(canonical_id, scope_key, valid_from)`` and
+        relationship-property uniqueness on the four SUPERSEDES/CORRECTS
+        cardinality properties. Nodes and edges missing the properties are not
+        constrained, so substrate data is unaffected. Every statement uses
+        ``IF NOT EXISTS``.
+        """
+        from graqle.ontology.assurance_integrity import ASSURANCE_CONSTRAINTS  # lazy
+
+        driver = self._get_driver()
+        with driver.session(database=self._database) as session:
+            for stmt in (
+                "CREATE INDEX cogninode_assurance_type IF NOT EXISTS "
+                "FOR (n:CogniNode) ON (n.assurance_type)",
+                "CREATE INDEX cogninode_scope_key IF NOT EXISTS FOR (n:CogniNode) ON (n.scope_key)",
+                "CREATE INDEX cogninode_lifecycle IF NOT EXISTS "
+                "FOR (n:CogniNode) ON (n.lifecycle_status)",
+                "CREATE INDEX relates_to_kind IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.kind)",
+                *ASSURANCE_CONSTRAINTS.values(),
+            ):
+                session.run(stmt)
+        logger.info(
+            "Assurance schema ensured: 4 indexes + %d constraints", len(ASSURANCE_CONSTRAINTS)
+        )
+
+    def apply_secondary_labels(self) -> int:
+        """Add the optional class label (``:Claim`` ...) to assurance nodes.
+
+        Labels cannot be parameters, so there is one static statement per
+        :class:`AssuranceClass` member, generated from the enum, never from
+        input (CR-016 §3.2). The ``assurance_type`` property stays authoritative.
+        """
+        from graqle.ontology.assurance import AssuranceClass  # lazy
+
+        total = 0
+        driver = self._get_driver()
+        with driver.session(database=self._database) as session:
+            for cls in AssuranceClass:
+                rec = session.run(
+                    f"MATCH (n:CogniNode {{assurance_type: '{cls.value}'}}) "
+                    f"WHERE NOT n:{cls.value} SET n:{cls.value} RETURN count(n) AS c"
+                ).single()
+                total += int(rec["c"]) if rec else 0
+        return total
+
+    def remove_secondary_labels(self) -> int:
+        """Remove every assurance class label (static statements, as above)."""
+        from graqle.ontology.assurance import AssuranceClass  # lazy
+
+        total = 0
+        driver = self._get_driver()
+        with driver.session(database=self._database) as session:
+            for cls in AssuranceClass:
+                rec = session.run(
+                    f"MATCH (n:CogniNode:{cls.value}) REMOVE n:{cls.value} RETURN count(n) AS c"
+                ).single()
+                total += int(rec["c"]) if rec else 0
+        return total
+
+    def read_assurance_rows(
+        self, queries: list[tuple[str, dict[str, Any]]]
+    ) -> list[list[dict[str, Any]]]:
+        """Run read-only queries in ONE read transaction; one row list per query."""
+        driver = self._get_driver()
+
+        def _read(tx: Any) -> list[list[dict[str, Any]]]:
+            return [[dict(r) for r in tx.run(q, **params)] for q, params in queries]
+
+        with driver.session(database=self._database) as session:
+            return session.execute_read(_read)
 
     # --- Layer 5 tamper-evidence: :CommittedBatch schema (R25-EU01 Task 1.6) ---
 

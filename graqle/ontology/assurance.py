@@ -726,6 +726,11 @@ def validate_assurance_graph(graph_data: Mapping[str, Any]) -> ValidationReport:
         for f in ("scope_key", "asserted_at"):
             if not props.get(f):
                 _err(f"{kind.value} missing {f}")
+        # PR-016b rule (c): an ordered edge needs an identity on both ends.
+        if kind in (EdgeKind.SUPERSEDES, EdgeKind.CORRECTS):
+            for side, node in (("source", src), ("target", tgt)):
+                if not node.get("canonical_id"):
+                    _err(f"{kind.value} requires canonical_id on the {side}")
 
     for n in nodes.values():
         if "assurance_type" not in n:
