@@ -1,4 +1,4 @@
-"""CR-018 PR-018b: DagSettings.provenance mount, manifest store, `graq dag rotate-key` (AC-6/7)."""
+"""CR-018 PR-018b: DagSettings.provenance mount, manifest store, high-water refusal (AC-6/7)."""
 
 from __future__ import annotations
 
@@ -9,16 +9,11 @@ from pathlib import Path
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from typer.testing import CliRunner
 
 from graqle.assurance.key_manifest_store import ManifestRecord, load_manifest, save_manifest
 from graqle.assurance.provenance_settings import ProvenanceSettings
 from graqle.assurance.settings import DagSettings, load_dag_settings, reset_dag_settings_cache
 from graqle.assurance.signing import DagSigner
-try:  # the `graq dag` CLI is not part of the 0.87.0 port; rotate-key tests skip without it
-    from graqle.cli.commands.dag import dag_app
-except ImportError:
-    dag_app = None
 from graqle.config.exceptions import ConfigurationError
 from graqle.governance.custody.ed25519_key_manifest import Ed25519KeyManifest, KeyState
 
@@ -84,13 +79,6 @@ def dag_env(tmp_path, monkeypatch):
 class SimpleNs:
     def __init__(self, **kw) -> None:
         self.__dict__.update(kw)
-
-
-def _rotate(env, out: Path | None = None, kid: str = NEW_KID):
-    if dag_app is None:
-        pytest.skip("graq dag CLI not present in this release")
-    out = out or env.tmp / "new.pem"
-    return CliRunner().invoke(dag_app, ["rotate-key", "--new-kid", kid, "--new-key-out", str(out)])
 
 
 # ---- DagSettings.provenance (ruling R3) --------------------------------------
@@ -162,104 +150,3 @@ def test_signer_refuses_version_below_high_water(dag_env):
         DagSigner(cfg, rec.manifest, high_water=2)
     DagSigner(cfg, rec.manifest, high_water=1)  # equal is fine
 
-
-# ---- graq dag rotate-key -------------------------------------------------------------
-
-
-def test_rotate_key_flag_off_exits_3(dag_env, monkeypatch):
-    monkeypatch.delenv("GRAQLE_DAG_ENABLED")
-    result = _rotate(dag_env)
-    assert result.exit_code == 3
-    assert not (dag_env.tmp / "new.pem").exists()
-
-
-def test_rotate_key_registers_successor_persists_and_signs_with_it(dag_env):
-    result = _rotate(dag_env)
-    assert result.exit_code == 0, result.output
-    assert f"GRAQLE_DAG_SIGNING_KEY_ID={NEW_KID}" in result.output
-    assert "GRAQLE_DAG_SIGNING_KEY_VERSION=2" in result.output
-    assert "PRIVATE" not in result.output
-    new_pem = dag_env.tmp / "new.pem"
-    assert new_pem.stat().st_mode & 0o777 == 0o600
-    rec = load_manifest(dag_env.manifest_path)
-    assert rec.versions == {KID: 1, NEW_KID: 2}
-    assert rec.manifest.get(KID).state is KeyState.ACTIVE  # retired later, never revoked
-    assert KID in rec.retire_at and rec.retire_at[KID] > datetime.now(timezone.utc)
-    # The key_rotated event exists on the system trajectory, signed by the new kid.
-    events = list(Path(".graqle/dag/events").glob("evt_*.json"))
-    assert len(events) == 1 and NEW_KID in events[0].read_text()
-    # Switching the environment over yields a working signer; the old version is now refused.
-    cfg = ProvenanceSettings(
-        signing_key_id=NEW_KID,
-        signing_key_version=2,
-        signing_key_path=str(new_pem),
-        coverage_policy_path="cp.yaml",
-    )
-    DagSigner(cfg, rec.manifest, high_water=rec.high_water)
-    stale = ProvenanceSettings(
-        signing_key_id=NEW_KID,
-        signing_key_version=1,
-        signing_key_path=str(new_pem),
-        coverage_policy_path="cp.yaml",
-    )
-    with pytest.raises(ConfigurationError, match="high-water"):
-        DagSigner(stale, rec.manifest, high_water=rec.high_water)
-
-
-def test_second_rotation_retires_the_first_keys_elapsed_overlap(dag_env, monkeypatch):
-    assert _rotate(dag_env).exit_code == 0
-    rec = load_manifest(dag_env.manifest_path)
-    save_manifest(
-        dag_env.manifest_path, rec.manifest, rec.versions, {KID: NOW - timedelta(days=1)}
-    )
-    monkeypatch.setenv("GRAQLE_DAG_SIGNING_KEY_ID", NEW_KID)
-    monkeypatch.setenv("GRAQLE_DAG_SIGNING_KEY_VERSION", "2")
-    monkeypatch.setenv("GRAQLE_DAG_SIGNING_KEY_PATH", str(dag_env.tmp / "new.pem"))
-    reset_dag_settings_cache()
-    assert _rotate(dag_env, dag_env.tmp / "newer.pem", "kid-c").exit_code == 0
-    assert load_manifest(dag_env.manifest_path).manifest.get(KID).state is KeyState.RETIRED
-
-
-def test_rotate_key_never_overwrites_an_existing_key_file(dag_env):
-    existing = dag_env.tmp / "new.pem"
-    existing.write_text("keep me")
-    result = _rotate(dag_env, existing)
-    assert result.exit_code == 2
-    assert existing.read_text() == "keep me"
-    assert load_manifest(dag_env.manifest_path).versions == {KID: 1}
-
-
-def test_rotate_key_rejects_a_known_kid_and_leaves_no_key_file(dag_env):
-    result = _rotate(dag_env, kid=KID)
-    assert result.exit_code == 2
-    assert not (dag_env.tmp / "new.pem").exists()
-
-
-def test_rotate_key_fails_closed_without_a_manifest(dag_env):
-    dag_env.manifest_path.unlink()
-    result = _rotate(dag_env)
-    assert result.exit_code == 2
-    assert not (dag_env.tmp / "new.pem").exists()
-
-
-def test_rotate_key_failure_after_key_write_removes_the_key_file(dag_env, monkeypatch):
-    from graqle.assurance import key_manifest_store
-
-    def boom(*a, **k):
-        raise OSError("disk full")
-
-    monkeypatch.setattr(key_manifest_store, "save_manifest", boom)
-    result = _rotate(dag_env)
-    assert result.exit_code == 2
-    assert not (dag_env.tmp / "new.pem").exists()
-    assert load_manifest(dag_env.manifest_path).versions == {KID: 1}
-
-
-def test_rotate_key_without_neo4j_credentials_fails_closed(dag_env, monkeypatch):
-    monkeypatch.setenv("GRAQLE_DAG_SEQUENCER", "neo4j")
-    monkeypatch.delenv("NEO4J_URI", raising=False)
-    monkeypatch.delenv("NEO4J_PASSWORD", raising=False)
-    reset_dag_settings_cache()
-    result = _rotate(dag_env)
-    assert result.exit_code == 2
-    assert not (dag_env.tmp / "new.pem").exists()
