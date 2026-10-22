@@ -15,7 +15,10 @@ from graqle.assurance.key_manifest_store import ManifestRecord, load_manifest, s
 from graqle.assurance.provenance_settings import ProvenanceSettings
 from graqle.assurance.settings import DagSettings, load_dag_settings, reset_dag_settings_cache
 from graqle.assurance.signing import DagSigner
-from graqle.cli.commands.dag import dag_app
+try:  # the `graq dag` CLI is not part of the 0.87.0 port; rotate-key tests skip without it
+    from graqle.cli.commands.dag import dag_app
+except ImportError:
+    dag_app = None
 from graqle.config.exceptions import ConfigurationError
 from graqle.governance.custody.ed25519_key_manifest import Ed25519KeyManifest, KeyState
 
@@ -84,6 +87,8 @@ class SimpleNs:
 
 
 def _rotate(env, out: Path | None = None, kid: str = NEW_KID):
+    if dag_app is None:
+        pytest.skip("graq dag CLI not present in this release")
     out = out or env.tmp / "new.pem"
     return CliRunner().invoke(dag_app, ["rotate-key", "--new-kid", kid, "--new-key-out", str(out)])
 

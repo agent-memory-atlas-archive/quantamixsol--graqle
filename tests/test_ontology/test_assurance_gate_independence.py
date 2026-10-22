@@ -11,20 +11,14 @@ from graqle.governance.shacl.assurance_validator import (  # noqa: E402
     AssuranceShaclValidator,
     check_assurance_gate,
 )
-from graqle.governance.trace_schema import ClearanceLevel, GovernedTrace, Outcome  # noqa: E402
+from graqle.governance.trace_schema import GovernedTrace  # noqa: E402
+from tests.test_governance.test_shacl import _make_valid_trace  # noqa: E402
 from tests.test_ontology.test_assurance_shapes import _graph  # noqa: E402
 
 
 def _trace(**kw) -> GovernedTrace:
-    d = dict(
-        tool_name="graq_reason",
-        query="independence",
-        outcome=Outcome.SUCCESS,
-        confidence=0.9,
-        clearance_level=ClearanceLevel.INTERNAL,
-    )
-    d.update(kw)
-    return GovernedTrace(**d)
+    # R22 on this base requires all eight protocol steps, so reuse the conforming trace
+    return _make_valid_trace(query="independence", **kw)
 
 
 def _r22(trace: GovernedTrace) -> dict:

@@ -508,7 +508,7 @@ def test_leaf_schema_files_unchanged_by_this_pr():
     root = Path(__file__).resolve().parents[2]
     for base in ("origin/master", "private/master"):
         out = subprocess.run(
-            ["git", "diff", "--name-only", f"{base}...HEAD", "--",
+            ["git", "diff", "--name-only", f"{base}", "HEAD", "--",  # tree compare: this branch's history is not a descendant of master's
              "graqle/governance/tamper_evidence/leaf_input_schema.py",
              "graqle/governance/tamper_evidence/committer.py",
              "graqle/config/attestation_config.py"],
