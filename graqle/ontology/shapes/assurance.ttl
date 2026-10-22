@@ -1,0 +1,68 @@
+# CR-016 section 5.6 (PR-016d): SHACL shapes for the PROV-O export of the assurance
+# graph (graqle.ontology.prov_export.export_prov). PUBLIC schema: structural checks
+# only; no resolution priorities and no inference rules are encoded here.
+#
+# Independent of the R22 governance shapes (graqle/governance/shacl/shapes.ttl):
+# different file, different namespace, different shapeSetVersion.
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix ga: <urn:graqle:assurance:> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+ga:ShapeSetMetadata ga:shapeSetVersion "1.0.0" .
+
+# Prefix declarations used by the sh:sparql constraints below.
+ga:ShapesOntology a owl:Ontology ;
+  sh:declare [ sh:prefix "ga" ; sh:namespace "urn:graqle:assurance:"^^xsd:anyURI ] ;
+  sh:declare [ sh:prefix "prov" ; sh:namespace "http://www.w3.org/ns/prov#"^^xsd:anyURI ] .
+
+ga:BitemporalShape a sh:NodeShape ;
+  sh:targetClass ga:Evidence, ga:Claim, ga:Abstraction, ga:Instruction, ga:Policy,
+                 ga:Decision, ga:Action, ga:Agent, ga:ProvenanceEvent ;
+  sh:property [ sh:path ga:valid_from ; sh:minCount 1 ; sh:datatype xsd:dateTime ] ;
+  sh:property [ sh:path ga:asserted_at ; sh:minCount 1 ; sh:datatype xsd:dateTime ] ;
+  sh:property [ sh:path ga:lifecycle_status ; sh:minCount 1 ;
+                sh:in ( "PROPOSED" "ACTIVE" "PENDING_RECOMPUTE" "SUPERSEDED" "INVALIDATED" "RETRACTED" ) ] .
+
+ga:EvidenceShape a sh:NodeShape ;
+  sh:targetClass ga:Evidence ;
+  sh:property [ sh:path ga:canonical_hash ; sh:minCount 1 ; sh:pattern "^[0-9a-f]{64}$" ] ;
+  sh:property [ sh:path ga:authenticity_status ; sh:minCount 1 ] .
+
+ga:ClaimSupportShape a sh:NodeShape ;
+  sh:targetClass ga:Claim ;
+  sh:sparql [
+    sh:message "Claim must have >=1 SUPPORTED_BY Evidence" ;
+    sh:prefixes ga:ShapesOntology ;
+    sh:select """SELECT $this WHERE {
+      $this ga:lifecycle_status "ACTIVE" .
+      FILTER NOT EXISTS { $this ga:SUPPORTED_BY ?e . ?e a ga:Evidence } }""" ] .
+
+ga:InvalidatedNotActiveShape a sh:NodeShape ;
+  sh:targetClass ga:Evidence, ga:Claim, ga:Abstraction, ga:Decision, ga:Action,
+                 ga:Instruction, ga:Policy ;
+  sh:sparql [
+    sh:message "INVALIDATES target must not be ACTIVE" ;
+    sh:prefixes ga:ShapesOntology ;
+    sh:select """SELECT $this WHERE {
+      $this prov:wasInvalidatedBy ?ev .
+      $this ga:lifecycle_status "ACTIVE" }""" ] .
+
+# The export carries each edge as a ga:AssuranceRelation with ga:edgeKind,
+# ga:edgeSource and ga:edgeTarget (prov_export.py, qualified form).
+ga:ContradictionResolvedShape a sh:NodeShape ;
+  sh:targetClass ga:Claim, ga:Abstraction ;
+  sh:sparql [
+    sh:message "CONTRADICTS pair must both be non-ACTIVE or carry a resolution reference" ;
+    sh:prefixes ga:ShapesOntology ;
+    sh:select """SELECT $this WHERE {
+      ?q a ga:AssuranceRelation ; ga:edgeKind "CONTRADICTS" ; ga:edgeSource $this ; ga:edgeTarget ?o .
+      $this ga:lifecycle_status "ACTIVE" .
+      ?o ga:lifecycle_status "ACTIVE" .
+      FILTER NOT EXISTS { ?q ga:resolution_event_id ?r } }""" ] .
+
+ga:GovernedDecisionShape a sh:NodeShape ;
+  sh:targetClass ga:Decision, ga:Action ;
+  sh:property [ sh:path ga:GOVERNED_BY ; sh:minCount 1 ;
+                sh:message "Decision/Action must be GOVERNED_BY >=1 Policy or Instruction" ] .
