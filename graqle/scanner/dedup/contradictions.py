@@ -112,6 +112,17 @@ def detect_contradictions(
     return contradictions
 
 
+def to_records(detections: list[dict], nodes: dict, scope_fn) -> list:
+    """Convert ``detect_contradictions`` output into persistable records (CR-017).
+
+    Additive: ``detect_contradictions`` and its output are unchanged. Imported
+    lazily so the scanner never loads the assurance package unless asked.
+    """
+    from graqle.assurance.conflicts import to_records as _to_records
+
+    return _to_records(detections, nodes, scope_fn)
+
+
 def _source_type(node: dict) -> str:
     """Classify source type of a node."""
     etype = node.get("entity_type", "").upper()
