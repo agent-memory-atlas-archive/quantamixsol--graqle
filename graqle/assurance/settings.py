@@ -812,4 +812,8 @@ def __getattr__(name: str) -> Any:
         from graqle.assurance import cv_settings
 
         return getattr(cv_settings, name)
+    if name == "TrajectorySettings":
+        from graqle.assurance import trajectory_settings
+
+        return trajectory_settings.TrajectorySettings
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

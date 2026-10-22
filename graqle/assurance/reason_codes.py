@@ -329,6 +329,27 @@ _SEED: tuple[ReasonCode, ...] = (
         "Early-step error detected in trajectory history.",
         "0.85.0",
     ),
+    ReasonCode(
+        "DAG-TR-003-ESTIMATOR_UNAVAILABLE",
+        Severity.CRITICAL,
+        "TR",
+        "",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-TR-004-TRAJECTORY_RELIABILITY_BELOW_FLOOR",
+        Severity.WARN,
+        "TR",
+        "Gather corroboration or resolve open conflicts before retrying.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-TR-005-HISTORY_INCOMPLETE",
+        Severity.WARN,
+        "TR",
+        "Re-instrument the checkpoint so the full history is recorded.",
+        "0.86.0",
+    ),
     # Provenance (CR-018)
     ReasonCode(
         "DAG-PV-CHAIN_BREAK",
