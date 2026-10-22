@@ -82,7 +82,7 @@ _FORBIDDEN_PATTERNS: dict[str, re.Pattern[str]] = {
 # ENGINEERING META-REFERENCES (e.g. "the `compliant` field is blocked").
 _LINE_EXEMPTION_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"never\s+say", re.IGNORECASE),
-    re.compile(r"do\s+not\s+claim", re.IGNORECASE),
+    re.compile(r"do(?:es)?\s+not\s+claim", re.IGNORECASE),
     re.compile(r"not\s+(?:compliant|certified)\b", re.IGNORECASE),
     # Lines that ONLY mention the words inside italic / backtick markers:
     # *compliant*, *certified*, `compliant`, `certified`. These are
@@ -163,27 +163,44 @@ class TestCanonicalPositioningMarkers:
     """Invariant 2: canonical positioning markers must appear verbatim."""
 
     def test_readme_has_aligned_badge_phrase(self):
+        # The simplified README (DAG-PORT-01) drops the aligned badge and
+        # states the posture as a disavowal: evidence for the deployer's own
+        # EU AI Act file, no claim of making anyone compliant. Pin that
+        # sentence, and pin the canonical "EU AI Act-aligned" phrase in the
+        # linked compliance docs.
         text = _normalise_dashes(README_PATH.read_text(encoding="utf-8"))
-        # Accept en-dash and hyphen variants. Post-normalisation both
-        # become hyphen.
-        assert "EU AI Act-aligned" in text or "EU AI Act-aligned" in text, (
-            "README must contain 'EU AI Act-aligned' (or with en-dash). "
-            "Per ADR-MARKETING-001 §11, this is the canonical posture word."
+        assert "EU AI Act file" in text
+        assert "does not claim to make you compliant" in text, (
+            "README must keep the explicit 'does not claim to make you "
+            "compliant' disavowal (ADR-MARKETING-001 §11)."
+        )
+        docs_readme = _normalise_dashes(
+            (EU_AI_ACT_DOCS_DIR / "README.md").read_text(encoding="utf-8")
+        )
+        assert "EU AI Act-aligned" in docs_readme, (
+            "docs/compliance/eu-ai-act/README.md must contain "
+            "'EU AI Act-aligned', the canonical posture word."
         )
 
     def test_readme_has_articles_scope_statement(self):
-        text = README_PATH.read_text(encoding="utf-8")
-        # Allow either comma-separated or with "and" before last.
+        # The simplified README links to the compliance docs instead of
+        # listing the articles; the link and the literal scope list in the
+        # docs README are both pinned.
         # ADR canonical: "Articles 6, 9, 12, 13, 14, 15, 25, 50".
-        assert "Articles 6, 9, 12, 13, 14, 15, 25, 50" in text, (
-            "README must contain the literal scope list "
-            "'Articles 6, 9, 12, 13, 14, 15, 25, 50' per ADR-MARKETING-001 §11."
+        text = README_PATH.read_text(encoding="utf-8")
+        assert "(./docs/compliance/eu-ai-act/)" in text, (
+            "README must link to docs/compliance/eu-ai-act/ for the scope."
+        )
+        docs_text = (EU_AI_ACT_DOCS_DIR / "README.md").read_text(encoding="utf-8")
+        assert "Articles 6, 9, 12, 13, 14, 15, 25, 50" in docs_text, (
+            "docs/compliance/eu-ai-act/README.md must contain the literal "
+            "scope list 'Articles 6, 9, 12, 13, 14, 15, 25, 50' per "
+            "ADR-MARKETING-001 §11."
         )
 
     def test_readme_has_not_high_risk_negation(self):
-        text = README_PATH.read_text(encoding="utf-8")
-        # Same negation TestPositioningStatement already asserts, but
-        # repeated here so the snapshot-lock is a single-file CI gate.
+        # The negation now lives in the compliance docs the README links to.
+        text = (EU_AI_ACT_DOCS_DIR / "README.md").read_text(encoding="utf-8")
         accepted = [
             "NOT a high-risk AI system",
             "NOT** itself a high-risk AI system",
@@ -197,9 +214,15 @@ class TestCanonicalPositioningMarkers:
         )
 
     def test_readme_has_not_gpai_provider_negation(self):
-        text = README_PATH.read_text(encoding="utf-8")
+        # The negation now lives in the compliance docs the README links to.
+        text = "\n".join(
+            md.read_text(encoding="utf-8")
+            for md in sorted(EU_AI_ACT_DOCS_DIR.glob("*.md"))
+        )
         accepted = [
             "NOT a GPAI provider",
+            "NOT a GPAI model provider",
+            "not a GPAI model provider",
             "NOT** a GPAI provider",
             "not a GPAI provider",
             "NOT a general-purpose AI MODEL provider",
@@ -241,14 +264,17 @@ class TestBadgeSvgUrlIntact:
 
     def test_readme_has_shields_io_badge_url(self):
         text = README_PATH.read_text(encoding="utf-8")
-        # The shields.io badge URL pattern for the EU AI Act-aligned badge.
-        # We don't pin the exact colour or query string — just the host
-        # + the "EU%20AI%20Act-aligned" stem so the badge keeps rendering.
-        assert (
-            "img.shields.io/badge/EU%20AI%20Act-aligned" in text
-            or "img.shields.io/badge/EU AI Act-aligned" in text
-        ), (
-            "README must contain the shields.io 'EU AI Act-aligned' badge "
-            "URL. The badge is part of the public positioning surface per "
-            "ADR-MARKETING-001 §11."
-        )
+        # The simplified README keeps shields.io badges (PyPI, Python,
+        # local-first) and carries no regulatory badge: a badge cannot hold
+        # the "evidence, not compliance" qualifier, so none may appear.
+        for stem in (
+            "img.shields.io/pypi/v/graqle",
+            "img.shields.io/badge/local--first-no%20telemetry",
+        ):
+            assert stem in text, f"README must keep the shields.io badge {stem!r}."
+        badge_urls = re.findall(r"img\.shields\.io/[^)\s]+", text)
+        assert badge_urls, "README must render shields.io badges."
+        assert not any(
+            re.search(r"compliant|certified|ai%20act", u, re.IGNORECASE)
+            for u in badge_urls
+        ), "README badges must not make a regulatory claim (ADR-MARKETING-001 §11)."
