@@ -13,18 +13,62 @@ on chunk embeddings for CypherActivation .
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
 import re
 from collections import defaultdict
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
+from graqle.config.exceptions import ENV_FLAG
 from graqle.connectors.base import BaseConnector
 
 logger = logging.getLogger("graqle.connectors.neo4j")
 
 
 _VALID_REL_TYPE_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+
+# ── DAG-2026 CR-016 PR-016b ──────────────────────────────────────────────────
+#: Closed allowlist of assurance edge properties ``save()`` passes through
+#: (CR-016 §3.2). Flat primitives only. Edges without ``kind`` never use it,
+#: so their Cypher is byte-identical to before (AC-1).
+_ASSURANCE_EDGE_PROPS: tuple[str, ...] = (
+    "kind",
+    "strength",
+    "scope_key",
+    "asserted_at",
+    "valid_from",
+    "valid_until",
+    "retracted_at",
+    "prov_event_id",
+    "resolution_status",
+    "resolution_event_id",
+    "contradiction_id",
+)
+#: Ordered kinds are created ONLY by Neo4jBatchPersister.persist_assurance_ops;
+#: save() skips them (existing edges are left untouched, never re-written).
+_ORDERED_EDGE_KINDS = frozenset({"SUPERSEDES", "CORRECTS"})
+#: Same positive allowlist as graqle.assurance.settings (CR-012 AC-1).
+_FLAG_TRUTHY = frozenset({"1", "true", "yes", "on"})
+#: Write-once assurance node fields; save() never writes them on a node that
+#: carries ``assurance_type``. Parity with graqle.ontology.assurance_ops is tested.
+_ASSURANCE_WRITE_ONCE = ("assurance_type", "canonical_id", "scope_key", "valid_from", "asserted_at")
+#: Properties only the assurance write path sets.
+_ASSURANCE_RESERVED = frozenset(
+    {
+        "integrity_digest",
+        "integrity_hmac_version",
+        "supersedes_in",
+        "supersedes_out",
+        "corrects_in",
+        "corrects_out",
+        "assurance_filled_fields",
+    }
+)
 
 
 def _sanitise_rel_type(name: Any) -> str:
@@ -140,6 +184,10 @@ class Neo4jConnector(BaseConnector):
     @property
     def uri(self) -> str:
         return self._uri
+
+    @property
+    def database(self) -> str:
+        return self._database
 
     def _get_driver(self):
         if self._driver is None:
@@ -257,6 +305,39 @@ class Neo4jConnector(BaseConnector):
     def save(self, nodes: dict[str, Any], edges: dict[str, Any]) -> None:
         """Batch write nodes and edges to Neo4j using UNWIND."""
         driver = self._get_driver()
+        skipped_ordered = 0
+        stripped_nodes = 0
+
+        # CR-016 PR-016b D6 (10-01 amendment): with the DAG flag ON, the guard looks
+        # at the STORED node/edge, not the input dict -- a caller can omit
+        # assurance_type / kind from this call even though the node or edge already
+        # carries one. M3: this stripping and the ordered-edge skip apply regardless
+        # of the flag (an intentional flag-off delta, CR-021 D6: save() is not a
+        # restore path for assurance data); only the stored-state lookup is flag-gated.
+        dag_on = os.environ.get(ENV_FLAG, "").strip().lower() in _FLAG_TRUTHY
+        stored_assurance_ids: set[str] = set()
+        stored_ordered_edge_ids: set[str] = set()
+        if dag_on and (nodes or edges):
+            with driver.session(database=self._database) as lookup:
+                if nodes:
+                    stored_assurance_ids = {
+                        r["id"]
+                        for r in lookup.run(
+                            "UNWIND $ids AS id MATCH (n:CogniNode {id: id}) "
+                            "WHERE n.assurance_type IS NOT NULL RETURN n.id AS id",
+                            ids=list(nodes),
+                        )
+                    }
+                if edges:
+                    stored_ordered_edge_ids = {
+                        r["id"]
+                        for r in lookup.run(
+                            "UNWIND $ids AS id MATCH ()-[r:RELATES_TO {id: id}]->() "
+                            "WHERE r.kind IN $kinds RETURN r.id AS id",
+                            ids=list(edges),
+                            kinds=list(_ORDERED_EDGE_KINDS),
+                        )
+                    }
 
         # Prepare node data
         node_rows = []
@@ -269,8 +350,18 @@ class Neo4jConnector(BaseConnector):
             }
             # Flatten simple properties (strings/numbers only)
             props = data.get("properties", {})
+            # CR-016 PR-016b: save() is not an assurance write path. It never
+            # writes the write-once fields of an assurance node, nor the
+            # properties only the write path sets; existing values are kept
+            # because ``SET n += row`` does not remove absent keys.
+            skip: frozenset[str] | set[str] = _ASSURANCE_RESERVED
+            if "assurance_type" in props or nid in stored_assurance_ids:
+                skip = _ASSURANCE_RESERVED | set(_ASSURANCE_WRITE_ONCE)
+                stripped_nodes += 1
             for k, v in props.items():
                 if k not in ("id", "label", "entity_type", "description", "chunks"):
+                    if k in skip:
+                        continue
                     if isinstance(v, (str, int, float, bool)):
                         row[k] = v
             node_rows.append(row)
@@ -278,13 +369,44 @@ class Neo4jConnector(BaseConnector):
         # Prepare edge data
         edge_rows = []
         for eid, data in edges.items():
-            edge_rows.append({
+            row = {
                 "id": eid,
                 "source": str(data["source"]),
                 "target": str(data["target"]),
                 "relationship": data.get("relationship", "RELATED_TO"),
                 "weight": data.get("weight", 1.0),
-            })
+            }
+            # CR-016 PR-016b: closed allowlist pass-through, only for edges that
+            # carry an assurance ``kind``.
+            eprops = data.get("properties") or {}
+            kind = data.get("kind", eprops.get("kind"))
+            is_ordered = (kind is not None and str(kind) in _ORDERED_EDGE_KINDS) or (
+                eid in stored_ordered_edge_ids
+            )
+            if is_ordered:
+                skipped_ordered += 1
+                continue
+            if kind is not None:
+                merged = {**eprops, **{k: data[k] for k in _ASSURANCE_EDGE_PROPS if k in data}}
+                row["props"] = {
+                    k: merged[k]
+                    for k in _ASSURANCE_EDGE_PROPS
+                    if k in merged and isinstance(merged[k], (str, int, float, bool))
+                }
+            edge_rows.append(row)
+        if skipped_ordered:
+            logger.warning(
+                "save() skipped %d SUPERSEDES/CORRECTS edge(s): they are written only "
+                "through Neo4jBatchPersister.persist_assurance_ops",
+                skipped_ordered,
+            )
+        if stripped_nodes:
+            # M3: WARNING, not DEBUG -- this is a flag-off save() into a fresh DB
+            # (restore, backend move) silently dropping assurance write-once fields,
+            # not a routine no-op.
+            logger.warning(
+                "save() left write-once fields untouched on %d assurance node(s)", stripped_nodes
+            )
 
         with driver.session(database=self._database) as session:
             # Batch UNWIND nodes
@@ -306,10 +428,11 @@ class Neo4jConnector(BaseConnector):
             rel_type_count = 0
             if edge_rows:
                 by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+                with_kind: dict[str, list[dict[str, Any]]] = defaultdict(list)
                 for row in edge_rows:
                     rtype = _sanitise_rel_type(row.get("relationship"))
-                    by_type[rtype].append(row)
-                rel_type_count = len(by_type)
+                    (with_kind if "props" in row else by_type)[rtype].append(row)
+                rel_type_count = len(set(by_type) | set(with_kind))
                 for rtype, rows in by_type.items():
                     session.run(
                         f"UNWIND $rows AS row "
@@ -318,6 +441,20 @@ class Neo4jConnector(BaseConnector):
                         f"MERGE (a)-[r:{rtype} {{id: row.id}}]->(b) "
                         f"SET r.relationship = row.relationship, "
                         f"    r.weight = row.weight",
+                        rows=rows,
+                    )
+                # CR-016 PR-016b: edges carrying an assurance kind get the
+                # allowlisted properties too. A separate statement, so edges
+                # without a kind keep their exact Cypher (AC-1 golden).
+                for rtype, rows in with_kind.items():
+                    session.run(
+                        f"UNWIND $rows AS row "
+                        f"MATCH (a:CogniNode {{id: row.source}}) "
+                        f"MATCH (b:CogniNode {{id: row.target}}) "
+                        f"MERGE (a)-[r:{rtype} {{id: row.id}}]->(b) "
+                        f"SET r.relationship = row.relationship, "
+                        f"    r.weight = row.weight, "
+                        f"    r += row.props",
                         rows=rows,
                     )
 
@@ -432,6 +569,87 @@ class Neo4jConnector(BaseConnector):
             self._vector_index_name,
             self._embedding_dimension,
         )
+
+        # CR-016 PR-016b: the assurance schema exists only with the DAG flag on,
+        # so flag off issues exactly the statements above (AC-1).
+        if os.environ.get(ENV_FLAG, "").strip().lower() in _FLAG_TRUTHY:
+            self.create_assurance_schema()
+
+    # --- DAG-2026 CR-016 PR-016b: assurance schema, labels and reads ---
+
+    def create_assurance_schema(self) -> None:
+        """Create the assurance indexes and the DB constraints (idempotent).
+
+        Constraints (measured on Neo4j Community Edition 2026.02.2): composite
+        node uniqueness on ``(canonical_id, scope_key, valid_from)`` and
+        relationship-property uniqueness on the four SUPERSEDES/CORRECTS
+        cardinality properties. Nodes and edges missing the properties are not
+        constrained, so substrate data is unaffected. Every statement uses
+        ``IF NOT EXISTS``.
+        """
+        from graqle.ontology.assurance_integrity import ASSURANCE_CONSTRAINTS  # lazy
+
+        driver = self._get_driver()
+        with driver.session(database=self._database) as session:
+            for stmt in (
+                "CREATE INDEX cogninode_assurance_type IF NOT EXISTS "
+                "FOR (n:CogniNode) ON (n.assurance_type)",
+                "CREATE INDEX cogninode_scope_key IF NOT EXISTS FOR (n:CogniNode) ON (n.scope_key)",
+                "CREATE INDEX cogninode_lifecycle IF NOT EXISTS "
+                "FOR (n:CogniNode) ON (n.lifecycle_status)",
+                "CREATE INDEX relates_to_kind IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.kind)",
+                *ASSURANCE_CONSTRAINTS.values(),
+            ):
+                session.run(stmt)
+        logger.info(
+            "Assurance schema ensured: 4 indexes + %d constraints", len(ASSURANCE_CONSTRAINTS)
+        )
+
+    def apply_secondary_labels(self) -> int:
+        """Add the optional class label (``:Claim`` ...) to assurance nodes.
+
+        Labels cannot be parameters, so there is one static statement per
+        :class:`AssuranceClass` member, generated from the enum, never from
+        input (CR-016 §3.2). The ``assurance_type`` property stays authoritative.
+        """
+        from graqle.ontology.assurance import AssuranceClass  # lazy
+
+        total = 0
+        driver = self._get_driver()
+        with driver.session(database=self._database) as session:
+            for cls in AssuranceClass:
+                rec = session.run(
+                    f"MATCH (n:CogniNode {{assurance_type: '{cls.value}'}}) "
+                    f"WHERE NOT n:{cls.value} SET n:{cls.value} RETURN count(n) AS c"
+                ).single()
+                total += int(rec["c"]) if rec else 0
+        return total
+
+    def remove_secondary_labels(self) -> int:
+        """Remove every assurance class label (static statements, as above)."""
+        from graqle.ontology.assurance import AssuranceClass  # lazy
+
+        total = 0
+        driver = self._get_driver()
+        with driver.session(database=self._database) as session:
+            for cls in AssuranceClass:
+                rec = session.run(
+                    f"MATCH (n:CogniNode:{cls.value}) REMOVE n:{cls.value} RETURN count(n) AS c"
+                ).single()
+                total += int(rec["c"]) if rec else 0
+        return total
+
+    def read_assurance_rows(
+        self, queries: list[tuple[str, dict[str, Any]]]
+    ) -> list[list[dict[str, Any]]]:
+        """Run read-only queries in ONE read transaction; one row list per query."""
+        driver = self._get_driver()
+
+        def _read(tx: Any) -> list[list[dict[str, Any]]]:
+            return [[dict(r) for r in tx.run(q, **params)] for q, params in queries]
+
+        with driver.session(database=self._database) as session:
+            return session.execute_read(_read)
 
     # --- Layer 5 tamper-evidence: :CommittedBatch schema (R25-EU01 Task 1.6) ---
 
@@ -571,6 +789,204 @@ class Neo4jConnector(BaseConnector):
             "Persisted :CommittedBatch %s (quarter=%s, %d record link(s))",
             batch_id, props["batch_quarter"], len(hashes),
         )
+
+    # --- CR-017 PR-017b: assurance mutations, read sessions, recompute queue ---
+
+    @contextmanager
+    def read_session(self) -> Iterator[Any]:
+        """A read-only session for planning passes (propagation never writes)."""
+        driver = self._get_driver()
+        with driver.session(database=self._database, default_access_mode="READ") as session:
+            yield session
+
+    @staticmethod
+    def _assurance_props(raw: dict[str, Any]) -> dict[str, Any]:
+        """Flatten a model dump to Neo4j property types: drop None, JSON-encode nested maps."""
+        import json
+
+        out: dict[str, Any] = {}
+        for key, value in raw.items():
+            if value is None:
+                continue
+            out[key] = json.dumps(value, sort_keys=True) if isinstance(value, dict) else value
+        return out
+
+    def create_recompute_schema(self) -> None:
+        """Idempotently create the ``:RecomputeTask`` uniqueness constraint (additive)."""
+        driver = self._get_driver()
+        with driver.session(database=self._database) as session:
+            session.run(
+                "CREATE CONSTRAINT recompute_task_id IF NOT EXISTS "
+                "FOR (t:RecomputeTask) REQUIRE t.task_id IS UNIQUE"
+            )
+
+    def backfill_assurance_seq(self, batch_size: int) -> int:
+        """Give every CogniNode without one ``assurance_seq = 0``; returns the nodes written.
+
+        Optional: readers treat an absent sequence as 0, so the mutation path does not need
+        this. It is never called implicitly. Runs in batches of ``batch_size``.
+        """
+        if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 1:
+            raise ValueError("batch_size must be a positive integer")
+        driver = self._get_driver()
+        total = 0
+        with driver.session(database=self._database) as session:
+            while True:
+                rec = session.run(
+                    "MATCH (n:CogniNode) WHERE n.assurance_seq IS NULL "
+                    "WITH n LIMIT $batch SET n.assurance_seq = 0 RETURN count(n) AS c",
+                    batch=batch_size,
+                ).single()
+                written = int(rec["c"]) if rec else 0
+                if written == 0:
+                    return total
+                total += written
+
+    def persist_assurance_mutation(self, m: Any) -> dict[str, Any]:
+        """Commit one ``AssuranceMutation`` in a single write transaction (CR-017 section 5.5).
+
+        ``m`` is duck-typed (this module never imports the assurance layer). Properties:
+
+        * The event is written once. If it already exists the call is an idempotent replay
+          and writes nothing else.
+        * Every planned node is locked, then its ``assurance_seq`` is compared with the
+          planned value. Any difference raises ``WriteCollisionError`` inside the
+          transaction, so the event, nodes, edges and tasks are all rolled back.
+        * Edges and tasks must find their endpoints; a missing endpoint raises and rolls back.
+        """
+        from graqle.governance.tamper_evidence.kg_persist import (  # lazy
+            KgPersistError,
+            WriteCollisionError,
+        )
+
+        node_rows = [{"node_id": w.node_id, "expected_seq": w.expected_seq, "set_props": dict(w.set_props)} for w in m.node_writes]
+        ids = [r["node_id"] for r in node_rows]
+        if len(set(ids)) != len(ids):
+            raise KgPersistError("a mutation may write each node at most once")
+        node_rows.sort(key=lambda r: r["node_id"])  # stable lock order across concurrent writers
+        edge_rows = [e.model_dump() for e in m.edge_writes]
+        task_rows = [{"task_id": t.task_id, "node_id": t.node_id, "props": t.model_dump()} for t in m.tasks]
+        event_id = m.event.event_id
+        event_props = self._assurance_props(m.event.model_dump(mode="json"))
+
+        def _write(tx: Any) -> dict[str, Any]:
+            rec = tx.run(
+                "MERGE (e:CogniNode {id: $id}) ON CREATE SET e += $props, e.created_in_tx = true "
+                "WITH e, (e.created_in_tx IS NOT NULL) AS fresh REMOVE e.created_in_tx RETURN fresh",
+                id=event_id,
+                props=event_props,
+            ).single()
+            if rec is None:
+                raise KgPersistError(f"event {event_id} could not be written")
+            if not rec["fresh"]:
+                return {"mutation_id": m.mutation_id, "replayed": True}
+            written = 0
+            if node_rows:
+                # Take the write locks first so the sequence comparison below reads committed state.
+                tx.run(
+                    "UNWIND $ids AS nid MATCH (n:CogniNode {id: nid}) SET n.assurance_seq = coalesce(n.assurance_seq, 0)",
+                    ids=[r["node_id"] for r in node_rows],
+                ).consume()
+                # Compare BEFORE writing so the error names the first genuinely stale node.
+                found = {
+                    r["id"]: r["act"]
+                    for r in tx.run(
+                        "UNWIND $ids AS nid MATCH (n:CogniNode {id: nid}) "
+                        "RETURN n.id AS id, coalesce(n.assurance_seq, 0) AS act",
+                        ids=[r["node_id"] for r in node_rows],
+                    )
+                }
+                for row in node_rows:
+                    if row["node_id"] not in found:
+                        raise KgPersistError(f"planned node {row['node_id']!r} does not exist")
+                    if found[row["node_id"]] != row["expected_seq"]:
+                        raise WriteCollisionError(row["node_id"], row["expected_seq"], found[row["node_id"]])
+                res = tx.run(
+                    "UNWIND $rows AS row MATCH (n:CogniNode {id: row.node_id}) "
+                    "WHERE coalesce(n.assurance_seq, 0) = row.expected_seq "
+                    "SET n += row.set_props, n.assurance_seq = coalesce(n.assurance_seq, 0) + 1 "
+                    "RETURN count(n) AS written",
+                    rows=node_rows,
+                ).single()
+                written = int(res["written"]) if res else 0
+                if written != len(node_rows):  # the locks make this unreachable unless the DB misbehaves
+                    raise KgPersistError("node write count mismatch; mutation aborted")
+            edges = 0
+            if edge_rows:
+                res = tx.run(
+                    "UNWIND $rows AS row MATCH (a:CogniNode {id: row.source_id}), (b:CogniNode {id: row.target_id}) "
+                    "MERGE (a)-[r:RELATES_TO {id: row.edge_id}]->(b) SET r.kind = row.kind, r += row.props "
+                    "RETURN count(r) AS n",
+                    rows=edge_rows,
+                ).single()
+                edges = int(res["n"]) if res else 0
+                if edges != len(edge_rows):
+                    raise KgPersistError("an edge endpoint does not exist; mutation aborted")
+            tasks = 0
+            if task_rows:
+                res = tx.run(
+                    "UNWIND $rows AS row MATCH (n:CogniNode {id: row.node_id}) "
+                    "MERGE (t:RecomputeTask {task_id: row.task_id}) ON CREATE SET t += row.props "
+                    "MERGE (t)-[u:RELATES_TO {id: 'e_' + row.task_id}]->(n) SET u.kind = 'USED' "
+                    "RETURN count(t) AS n",
+                    rows=task_rows,
+                ).single()
+                tasks = int(res["n"]) if res else 0
+                if tasks != len(task_rows):
+                    raise KgPersistError("a recompute task target does not exist; mutation aborted")
+            return {
+                "mutation_id": m.mutation_id,
+                "replayed": False,
+                "nodes_written": written,
+                "edges_written": edges,
+                "tasks_written": tasks,
+            }
+
+        driver = self._get_driver()
+        with driver.session(database=self._database) as session:
+            return session.execute_write(_write)
+
+    def claim_recompute_tasks(self, batch_size: int) -> list[dict[str, Any]]:
+        """Move up to ``batch_size`` QUEUED tasks to RUNNING in one transaction; returns them.
+
+        The claim writes a token first (taking the node lock) and re-checks the state
+        afterwards, so two workers never receive the same task.
+        """
+        if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 1:
+            raise ValueError("batch_size must be a positive integer")
+
+        def _claim(tx: Any) -> list[dict[str, Any]]:
+            rows = tx.run(
+                "MATCH (t:RecomputeTask) WHERE t.state = 'QUEUED' "
+                "WITH t ORDER BY t.enqueued_at, t.task_id LIMIT $n "
+                "SET t.claim_token = $token "
+                "WITH t WHERE t.state = 'QUEUED' "
+                "SET t.state = 'RUNNING' "
+                "RETURN properties(t) AS props",
+                n=batch_size,
+                token=hashlib.sha256(os.urandom(16)).hexdigest()[:16],
+            )
+            return [dict(r["props"]) for r in rows]
+
+        driver = self._get_driver()
+        with driver.session(database=self._database) as session:
+            return session.execute_write(_claim)
+
+    def set_recompute_task_state(self, task_id: str, state: str, attempts: int, error: str | None = None) -> None:
+        """Set a task's state and attempt count; raises if the task does not exist."""
+        driver = self._get_driver()
+        with driver.session(database=self._database) as session:
+            rec = session.run(
+                "MATCH (t:RecomputeTask {task_id: $id}) "
+                "SET t.state = $state, t.attempts = $attempts, t.last_error = $error "
+                "RETURN count(t) AS n",
+                id=task_id,
+                state=state,
+                attempts=attempts,
+                error=error,
+            ).single()
+        if rec is None or int(rec["n"]) != 1:
+            raise ValueError(f"recompute task {task_id!r} not found")
 
     def count_uncommitted_records(self) -> int:
         """Count governed-trace records not yet linked to any ``:CommittedBatch``.

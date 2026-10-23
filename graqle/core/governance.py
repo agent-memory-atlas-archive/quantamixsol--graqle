@@ -701,6 +701,36 @@ class GovernanceMiddleware:
         action: str = "edit",
         actor: str = "",
     ) -> GateResult:
+        """Run the governance check; routes through the DAG adapter only when the flag is on.
+
+        With ``GRAQLE_DAG_ENABLED`` unset this is exactly ``_check_legacy``.
+        """
+        kwargs = dict(
+            diff=diff, content=content, file_path=file_path, risk_level=risk_level,
+            impact_radius=impact_radius, approved_by=approved_by,
+            justification=justification, action=action, actor=actor,
+        )
+        from graqle.assurance.settings import is_dag_enabled  # pure env read
+
+        if is_dag_enabled():
+            from graqle.assurance.adapter import route_via_dag  # lazy; unreachable flag-off
+
+            return route_via_dag(self, self._check_legacy, **kwargs)
+        return self._check_legacy(**kwargs)
+
+    def _check_legacy(
+        self,
+        *,
+        diff: str = "",
+        content: str = "",
+        file_path: str = "",
+        risk_level: str = "LOW",
+        impact_radius: int = 0,
+        approved_by: str = "",
+        justification: str = "",
+        action: str = "edit",
+        actor: str = "",
+    ) -> GateResult:
         """Run the full 3-tier governance check.
 
         Args:

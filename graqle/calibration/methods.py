@@ -53,7 +53,41 @@ def _sigmoid(x: float | np.ndarray) -> float | np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-class BaseCalibrator(ABC):
+class CalibratorVersionMixin:
+    """Version and fitted-at stamp for a calibrator (CR-014 PR-014a, additive).
+
+    Defaults mean "never stamped": ``calibrator_version == "uncalibrated"`` and
+    ``fitted_at_unix is None``. The DAG calibrator registry (CR-014 PR-014c)
+    stamps both and derives staleness from them; the scalar calibration path
+    ignores them. Saved files gain the two keys; files written before this
+    change still load, with the defaults.
+    """
+
+    calibrator_version: str = "uncalibrated"
+    fitted_at_unix: float | None = None
+
+    def stamp(self, calibrator_version: str, fitted_at_unix: float | None) -> None:
+        """Record which calibration this is and when it was fitted."""
+        if not calibrator_version or not calibrator_version.strip():
+            raise ValueError("calibrator_version must be a non-empty string")
+        if fitted_at_unix is not None and not np.isfinite(fitted_at_unix):
+            raise ValueError("fitted_at_unix must be finite or None")
+        self.calibrator_version = calibrator_version
+        self.fitted_at_unix = None if fitted_at_unix is None else float(fitted_at_unix)
+
+    def _version_payload(self) -> dict[str, Any]:
+        return {
+            "calibrator_version": self.calibrator_version,
+            "fitted_at_unix": self.fitted_at_unix,
+        }
+
+    def _restore_version(self, data: dict[str, Any]) -> None:
+        version = data.get("calibrator_version")
+        if version is not None:
+            self.stamp(str(version), data.get("fitted_at_unix"))
+
+
+class BaseCalibrator(CalibratorVersionMixin, ABC):
     """Abstract base class for confidence calibrators."""
 
     @property
@@ -172,7 +206,7 @@ class TemperatureScaling(BaseCalibrator):
     def save(self, path: str) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         Path(path).write_text(
-            json.dumps({"temperature": self._temperature}, indent=2),
+            json.dumps({"temperature": self._temperature, **self._version_payload()}, indent=2),
             encoding="utf-8",
         )
 
@@ -191,6 +225,7 @@ class TemperatureScaling(BaseCalibrator):
             )
         inst = cls(temperature=temp)
         inst._fitted = True
+        inst._restore_version(data)
         return inst
 
 
@@ -251,7 +286,7 @@ class PlattScaling(BaseCalibrator):
     def save(self, path: str) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         Path(path).write_text(
-            json.dumps({"a": self._a, "b": self._b}, indent=2),
+            json.dumps({"a": self._a, "b": self._b, **self._version_payload()}, indent=2),
             encoding="utf-8",
         )
 
@@ -260,6 +295,7 @@ class PlattScaling(BaseCalibrator):
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         inst = cls(a=float(data["a"]), b=float(data["b"]))
         inst._fitted = True
+        inst._restore_version(data)
         return inst
 
 

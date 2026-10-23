@@ -4,6 +4,26 @@ All notable changes to GraQle are documented in this file.
 
 ---
 
+## 0.87.0 — Decision Assurance Gate
+
+### Added
+
+- **Decision Assurance Gate** (`graqle.assurance`). Before an agent acts, the gate answers `EXECUTE`, `REPLAN`,
+  `HOLD`, `REJECT` or `ESCALATE` with a decisive rule and reason codes. It is off by default
+  (`GRAQLE_DAG_ENABLED`); with the flag off behaviour is unchanged.
+- Hard gates (policy, actor, evidence, exact arguments), contradiction tracking with dependent-decision
+  recomputation, a per-dimension confidence vector with projection, trajectory estimators with replanning and
+  escalation routing, and a threshold-study and an intervention-study runner (`graq assurance`).
+- Signed, hash-chained provenance events with key rotation support, a PROV-O export and SHACL shapes for
+  auditor-side checks.
+- Simplified README and PyPI description.
+
+### Notes
+
+- The `graq dag` command group is not part of this release.
+
+---
+
 ## 0.86.0 — 2026-10-21 (Shared server and relay)
 
 ### Added

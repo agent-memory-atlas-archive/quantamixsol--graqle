@@ -69,6 +69,8 @@ _SUBSTITUTE_REQUIRED: dict[str, str] = {
     "GRAQLE_DAG_CIRCUIT_BREAKER_WINDOW": "5",
     "GRAQLE_DAG_SIGNING_KEY_ID": "kid-test-2026",
     "GRAQLE_DAG_SIGNING_KEY_VERSION": "1",
+    "GRAQLE_DAG_SCOPE_KEY_FIELDS_REF": "scope_fields_test",
+    "GRAQLE_DAG_MERGE_PRIORITY_REF": "sdk_default",
 }
 
 

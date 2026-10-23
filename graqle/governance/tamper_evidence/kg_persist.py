@@ -34,6 +34,7 @@ Design notes:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from graqle.governance.tamper_evidence.errors import TamperEvidenceError
@@ -41,6 +42,8 @@ from graqle.governance.tamper_evidence.errors import TamperEvidenceError
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from graqle.connectors.neo4j import Neo4jConnector
     from graqle.governance.tamper_evidence.committer import BatchCommit
+    from graqle.ontology.assurance_integrity import IntegrityKeyring
+    from graqle.ontology.assurance_ops import AssuranceOp
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +56,40 @@ class KgPersistError(TamperEvidenceError):
     not yet anchored). Wrapping driver errors in this type makes the failure mode
     explicit and keeps the tamper-evidence error hierarchy uniform.
     """
+
+
+class AssuranceWriteRefusedError(KgPersistError):
+    """An assurance write was refused on purpose; retrying it cannot succeed.
+
+    Raised for a rule violation (write-once field changed, ordering rule (d),
+    missing ``canonical_id``, a missing endpoint) and for a DB constraint
+    rejection (duplicate version, a second SUPERSEDES/CORRECTS in or out).
+    Distinct from a transient :class:`KgPersistError` so a caller never retries
+    a write that would corrupt the assurance graph.
+    """
+
+
+class WriteCollisionError(KgPersistError):
+    """A planned node's ``assurance_seq`` changed between planning and commit (CR-017).
+
+    Names the first conflicting node. The whole mutation was rolled back: nothing was
+    written. ``code`` is the registered reason code for the verdict layer.
+    """
+
+    code = "DAG-PV-WRITE-COLLISION"
+
+    def __init__(self, node_id: str, expected: int, actual: int) -> None:
+        super().__init__(
+            f"write collision on {node_id!r}: expected assurance_seq {expected}, found {actual}; mutation aborted"
+        )
+        self.node_id = node_id
+        self.expected = expected
+        self.actual = actual
+
+
+def _is_constraint_rejection(exc: BaseException) -> bool:
+    code = str(getattr(exc, "code", "") or "")
+    return type(exc).__name__ == "ConstraintError" or code.endswith("ConstraintValidationFailed")
 
 
 def batch_commit_to_props(batch: "BatchCommit") -> dict[str, Any]:
@@ -121,10 +158,156 @@ class Neo4jBatchPersister:
         ensure.
     """
 
-    def __init__(self, connector: "Neo4jConnector", ensure_schema: bool = True) -> None:
+    def __init__(
+        self,
+        connector: "Neo4jConnector",
+        ensure_schema: bool = True,
+        integrity_keyring: IntegrityKeyring | None = None,
+        write_collision_retries: int | None = None,
+    ) -> None:
+        # No default: the retry count is a protected tuning value (CR-017 PR-017b).
+        self._write_collision_retries = write_collision_retries
         self._connector = connector
         self._ensure_schema = ensure_schema
         self._schema_ready = False
+        self._keyring = integrity_keyring
+        self._assurance_constraints_checked = False
+
+    @property
+    def connector(self) -> Neo4jConnector:
+        return self._connector
+
+    # ── DAG-2026 CR-016 PR-016b: the assurance write path ─────────────────
+
+    def persist_assurance_ops(self, ops: Sequence[AssuranceOp]) -> None:
+        """Apply assurance ops in ONE write transaction (CR-016 §3.2).
+
+        The only SDK path that writes assurance write-once fields or creates
+        SUPERSEDES/CORRECTS edges. Raises :class:`AssuranceWriteRefusedError` for a
+        rule or constraint violation (never retry) and :class:`KgPersistError`
+        for anything else. Without an integrity keyring nothing is written:
+        an unsigned write would look like tampering to the verifier.
+        """
+        if self._keyring is None:
+            raise KgPersistError(
+                "persist_assurance_ops needs an integrity keyring; nothing written"
+            )
+        if not ops:
+            return
+        self._ensure_assurance_constraints()
+        try:
+            # lazy: the private write path
+            from graqle.governance.tamper_evidence import _assurance_write
+
+            _assurance_write.write_ops(
+                self._connector._get_driver(), self._connector.database, list(ops), self._keyring
+            )
+        except KgPersistError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - wrap-and-propagate by design
+            if _is_constraint_rejection(exc):
+                raise AssuranceWriteRefusedError(
+                    f"DB constraint rejected the assurance write: {exc}"
+                ) from exc
+            logger.error("assurance write failed (%d ops)", len(ops), exc_info=True)
+            raise KgPersistError(f"failed to persist {len(ops)} assurance op(s): {exc}") from exc
+
+    def persist_assurance_mutation(
+        self,
+        m: Any,
+        replanner: Callable[[Any], Any | None] | None = None,
+    ) -> Any:
+        """Commit one mutation atomically (CR-017 section 5.5).
+
+        ``m`` is a ``graqle.assurance.conflicts.AssuranceMutation`` and the result a
+        ``MutationReceipt``; both are typed ``Any`` because governance never imports the
+        assurance layer (import direction, CR-012 N5).
+
+        On :class:`WriteCollisionError` the optional ``replanner`` re-reads the sequences and
+        re-derives the mutation; it returns ``None`` to give up. Without a replanner, or when
+        the retry budget is spent, the collision is raised and nothing was committed. Any
+        other failure is wrapped in :class:`KgPersistError`; there is no silent success.
+        """
+        retries = self._write_collision_retries
+        if isinstance(retries, bool) or not isinstance(retries, int) or retries < 1:
+            raise KgPersistError("persist_assurance_mutation needs write_collision_retries >= 1; nothing written")
+        last: WriteCollisionError | None = None
+        for attempt in range(1, retries + 1):
+            try:
+                return self._connector.persist_assurance_mutation(m)
+            except WriteCollisionError as exc:
+                last = exc
+                logger.warning("write collision on %s (attempt %d): %s", exc.node_id, attempt, exc)
+                if replanner is None or attempt == retries:
+                    raise
+                replanned = replanner(m)
+                if replanned is None:
+                    raise
+                m = replanned
+            except KgPersistError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - wrap-and-propagate by design
+                logger.error("assurance mutation %s failed", m.mutation_id, exc_info=True)
+                raise KgPersistError(f"failed to persist assurance mutation {m.mutation_id}: {exc}") from exc
+        raise last if last is not None else KgPersistError("no attempt was made")  # pragma: no cover
+
+    def _ensure_assurance_constraints(self) -> None:
+        """M2: fail closed if the DB constraints rules (a) and (b) rely on are absent.
+
+        ``create_assurance_schema`` only runs from flag-on ``create_schema()``, so on a
+        database where it never ran, the constraints that reject a duplicate version or
+        a second SUPERSEDES/CORRECTS in/out are simply missing and writes would land
+        silently. Checked once per persister instance, by shape (not by name), reusing
+        :data:`ASSURANCE_CONSTRAINT_SHAPES`.
+        """
+        if self._assurance_constraints_checked:
+            return
+        from graqle.ontology.assurance_integrity import ASSURANCE_CONSTRAINT_SHAPES  # lazy
+
+        try:
+            rows = self._connector.read_assurance_rows(
+                [("SHOW CONSTRAINTS YIELD name, type, labelsOrTypes, properties RETURN *", {})]
+            )[0]
+        except Exception as exc:  # noqa: BLE001 - an unmeasured DB is never ready
+            raise KgPersistError(f"failed to read DB constraints: {exc}") from exc
+        present = {
+            (r.get("type"), tuple(r.get("labelsOrTypes") or ()), tuple(r.get("properties") or ()))
+            for r in rows
+        }
+        missing = sorted(
+            name
+            for name, (ctype, target, props) in ASSURANCE_CONSTRAINT_SHAPES.items()
+            if (ctype, (target,), props) not in present
+        )
+        if missing:
+            raise KgPersistError(
+                f"assurance DB constraints missing: {', '.join(missing)}; "
+                "run create_assurance_schema() before persist_assurance_ops"
+            )
+        self._assurance_constraints_checked = True
+
+    def rollback_assurance_migration(self) -> dict[str, int]:
+        """Undo every open MIGRATION event through the private write path (CR-016 §5.3, B3)."""
+        if self._keyring is None:
+            raise KgPersistError(
+                "rollback_assurance_migration needs an integrity keyring; refusing to strip "
+                "unverified digests"
+            )
+        try:
+            # lazy: the private write path
+            from graqle.governance.tamper_evidence import _assurance_write
+
+            return _assurance_write.rollback_migration(
+                self._connector._get_driver(), self._connector.database, self._keyring
+            )
+        except KgPersistError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - wrap-and-propagate by design
+            if _is_constraint_rejection(exc):
+                raise AssuranceWriteRefusedError(
+                    f"DB constraint rejected the rollback: {exc}"
+                ) from exc
+            raise KgPersistError(f"assurance migration rollback failed: {exc}") from exc
 
     def __call__(self, batch: "BatchCommit") -> None:
         """Persist ``batch`` to the KG; raise :class:`KgPersistError` on failure.

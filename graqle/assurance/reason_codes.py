@@ -91,11 +91,488 @@ class ReasonCode:
             raise ValueError("remediation_hint exceeds the length cap")
 
 
-#: The registry seed. Each code family is seeded by the change request that
-#: introduces it; 0.84.1 ships the grammar and the invariants, and seeding
-#: begins with CR-013. INV-RC-2 (append-only, monotone ``since_version``) holds:
-#: appending to an empty seed is a plain append.
-_SEED: tuple[ReasonCode, ...] = ()
+_SEED: tuple[ReasonCode, ...] = (
+    # HG-01 mandatory policy (CR-013)
+    ReasonCode(
+        "DAG-HG01-POLICY_MISSING",
+        Severity.CRITICAL,
+        "HG-01",
+        "Attach the governing policy node in scope before retrying.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-HG01-POLICY_EXPIRED",
+        Severity.CRITICAL,
+        "HG-01",
+        "Policy valid_until has passed; obtain the superseding policy.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-HG01-POLICY_UNRESOLVED",
+        Severity.CRITICAL,
+        "HG-01",
+        "Policy has open CONTRADICTS without COEXISTS_WITH resolution.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-HG01-POLICY_VIOLATED",
+        Severity.CRITICAL,
+        "HG-01",
+        "Action conflicts with a resolved policy clause; replan.",
+        "0.85.0",
+    ),
+    # HG-02 invalidated evidence (OQ-4: FAIL, resolvable, REPLAN-eligible)
+    ReasonCode(
+        "DAG-HG02-EVIDENCE_INVALIDATED",
+        Severity.FAIL,
+        "HG-02",
+        "Depends on INVALIDATED evidence; wait for recomputation.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-HG02-RECOMPUTE_INCOMPLETE",
+        Severity.FAIL,
+        "HG-02",
+        "Recomputation queue has pending items for implicated nodes.",
+        "0.85.0",
+    ),
+    # HG-03 provenance
+    ReasonCode(
+        "DAG-HG03-PROVENANCE_MISSING",
+        Severity.CRITICAL,
+        "HG-03",
+        "High-impact claim lacks a ProvenanceEvent; capture provenance first.",
+        "0.85.0",
+    ),
+    # HG-04 args binding (binding computed in CR-018)
+    ReasonCode(
+        "DAG-HG04-ARGS_HASH_MISMATCH",
+        Severity.CRITICAL,
+        "HG-04",
+        "Invoked args differ from approved args; re-request approval.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-HG04-ARGS_HASH_ALGO_MISMATCH",
+        Severity.CRITICAL,
+        "HG-04",
+        "Hash algorithm differs from approval-time algorithm.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-HG04-BINDING_ABSENT",
+        Severity.CRITICAL,
+        "HG-04",
+        "No approved_args_hash recorded at grant time.",
+        "0.85.0",
+    ),
+    # HG-05 poisoning
+    ReasonCode(
+        "DAG-HG05-POISONING_DETECTED",
+        Severity.CRITICAL,
+        "HG-05",
+        "Poisoning severity at or above threshold; quarantine source.",
+        "0.85.0",
+    ),
+    # HG-06 authorization
+    ReasonCode(
+        "DAG-HG06-ACTOR_UNAUTHORIZED",
+        Severity.CRITICAL,
+        "HG-06",
+        "Actor role cannot approve this tier (core/rbac.py).",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-HG06-RBAC_UNAVAILABLE",
+        Severity.CRITICAL,
+        "HG-06",
+        "RBAC check raised or timed out; fail-closed.",
+        "0.85.0",
+    ),
+    # HG-07 contradiction
+    ReasonCode(
+        "DAG-HG07-CONTRADICTION_UNRESOLVED",
+        Severity.CRITICAL,
+        "HG-07",
+        "Material CONTRADICTS edge without COEXISTS_WITH rule.",
+        "0.85.0",
+    ),
+    # Cap
+    ReasonCode(
+        "DAG-RP-CAP_APPLIED",
+        Severity.FAIL,
+        "CAP",
+        "Critical-failure cap applied after hard-gate failure.",
+        "0.85.0",
+    ),
+    # Confidence vector (CR-014)
+    ReasonCode(
+        "DAG-CV-BELOW_PROJECTION",
+        Severity.WARN,
+        "CV",
+        "Projected confidence below policy projection threshold.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-CALIBRATOR_STALE",
+        Severity.WARN,
+        "CV",
+        "Calibrator older than TTL; recalibrate.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-RAW_CAL_DIVERGENCE",
+        Severity.WARN,
+        "CV",
+        "Raw vs calibrated divergence exceeds bound.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-DIM_MISSING",
+        Severity.WARN,
+        "CV",
+        "A confidence dimension could not be computed (missing data).",
+        "0.85.0",
+    ),
+    # CR-014 PR-014b: numbered confidence-vector codes (spec section 5.1). Severity is
+    # static per code, so a code that is FAIL only for mandatory dimensions is
+    # registered at its stricter level (fail closed).
+    ReasonCode(
+        "DAG-CV-001-DIM_NOT_AVAILABLE",
+        Severity.FAIL,
+        "CV-DIM",
+        "A confidence dimension has no instrumentation; configure its provider.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-002-CALIBRATION_STALE",
+        Severity.WARN,
+        "CV-CAL",
+        "Calibration record is older than its time-to-live; refit the calibrator.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-003-DIVERGENCE_EXCEEDED",
+        Severity.WARN,
+        "CV-CAL",
+        "Calibrated value departs from raw beyond the bound; calibrated value withheld.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-004-PROJECTION_SKIPPED_HG_FAIL",
+        Severity.INFO,
+        "CV-PROJ",
+        "Projection skipped because a hard gate failed.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-004-GENERATOR_CORRELATED",
+        Severity.INFO,
+        "CV-COR",
+        "Evidence from a shared generator was counted once for corroboration.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-005-BELOW_POLICY_THRESHOLD",
+        Severity.FAIL,
+        "CV-PROJ",
+        "Decision score is below the class policy threshold; route to hold.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-006-CALIBRATOR_VERSION_UNKNOWN",
+        Severity.FAIL,
+        "CV-CAL",
+        "Calibrator version is unknown to the registry; register or refit it.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-007-PROVIDER_ERROR",
+        Severity.FAIL,
+        "CV-DIM",
+        "A dimension provider raised; the dimension is unavailable (fail closed).",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-008-CONFIG_INVALID",
+        Severity.CRITICAL,
+        "CV-CFG",
+        "Confidence-vector configuration is invalid; fix the named setting.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-009-SOURCE_INDEPENDENCE_UNRESOLVED",
+        Severity.WARN,
+        "CV-COR",
+        "Source identity is missing for some evidence; independence is under-determined.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-CV-010-CRITICAL_CAP_APPLIED",
+        Severity.INFO,
+        "CV-PROJ",
+        "The critical-failure cap bounded the decision score.",
+        "0.85.0",
+    ),
+    # Trajectory (CR-015)
+    ReasonCode(
+        "DAG-TR-RELIABILITY_LOW",
+        Severity.WARN,
+        "TR",
+        "Trajectory reliability below checkpoint floor.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-TR-EARLY_ERROR",
+        Severity.WARN,
+        "TR",
+        "Early-step error detected in trajectory history.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-TR-003-ESTIMATOR_UNAVAILABLE",
+        Severity.CRITICAL,
+        "TR",
+        "",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-TR-004-TRAJECTORY_RELIABILITY_BELOW_FLOOR",
+        Severity.WARN,
+        "TR",
+        "Gather corroboration or resolve open conflicts before retrying.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-TR-005-HISTORY_INCOMPLETE",
+        Severity.WARN,
+        "TR",
+        "Re-instrument the checkpoint so the full history is recorded.",
+        "0.86.0",
+    ),
+    # Gate routing (CR-015 PR-015b)
+    ReasonCode(
+        "DAG-TR-001-RETRY_BUDGET_EXHAUSTED",
+        Severity.FAIL,
+        "RP",
+        "",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-TR-002-UNCHANGED_REASON_DETECTED",
+        Severity.FAIL,
+        "RP",
+        "",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-TR-006-AUTHORITY_EXCEEDED",
+        Severity.FAIL,
+        "RT",
+        "",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-TR-007-IMPACT_EXCEEDED",
+        Severity.FAIL,
+        "RT",
+        "",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-TR-008-ARTICLE14_PLACEHOLDER_THRESHOLD",
+        Severity.WARN,
+        "ESC",
+        "The human-oversight threshold is a placeholder; a human must review.",
+        "0.86.0",
+    ),
+    # Escalation routing (CR-015 PR-015c)
+    ReasonCode(
+        "DAG-TR-009-ESCALATION_QUEUE_UNAVAILABLE",
+        Severity.WARN,
+        "RT",
+        "The escalation queue was unreachable; the package was written to the local fallback.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-TR-011-RBAC_UNAVAILABLE",
+        Severity.WARN,
+        "RT",
+        "Reviewer eligibility could not be resolved; the package was routed to the administrator role.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-TR-010-EVALUATION_ERROR",
+        Severity.FAIL,
+        "GATE",
+        "",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-TR-012-HOLD_EVIDENCE_INCOMPLETE",
+        Severity.WARN,
+        "RT",
+        "Request the missing evidence or a human review.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-TR-013-RESIDUAL_RISK_EXCEEDS_BUDGET",
+        Severity.WARN,
+        "RT",
+        "Reduce residual risk or obtain a human review.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-TR-014-REPLAN_RESOLVABLE",
+        Severity.INFO,
+        "RP",
+        "The failure reasons are resolvable by a new candidate.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-TR-015-PROVENANCE_EMIT_FAILED",
+        Severity.WARN,
+        "GATE",
+        "Restore the audit or provenance sink.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-TR-016-ARTICLE14_REVIEW_REQUIRED",
+        Severity.WARN,
+        "ESC",
+        "Human oversight review is required before this action proceeds.",
+        "0.86.0",
+    ),
+    # Provenance (CR-018)
+    ReasonCode(
+        "DAG-PV-CHAIN_BREAK",
+        Severity.CRITICAL,
+        "PV",
+        "previous_event_hash does not match prior event.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-PV-SEQUENCE_GAP",
+        Severity.CRITICAL,
+        "PV",
+        "sequence_number gap detected.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-PV-SEQ-CONFLICT",
+        Severity.FAIL,
+        "PV",
+        "Sequence allocation lost its race and the retry budget is spent.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-PV-RECORD-FAILED",
+        Severity.CRITICAL,
+        "PV",
+        "Provenance event could not be recorded; execution must not proceed.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-PV-KEY-ROTATED",
+        Severity.INFO,
+        "PV",
+        "Signing key rotated; successor key is active.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-PV-KEYING_UNRECOGNISED",
+        Severity.FAIL,
+        "PV",
+        "config_provenance keying is outside the closed allow-list; not anchored.",
+        "0.86.0",
+    ),
+    # Conflict resolution and dependency propagation (CR-017)
+    ReasonCode(
+        "DAG-PV-INVALIDATED",
+        Severity.FAIL,
+        "HG-02",
+        "Node is INVALIDATED; it cannot be reused until replaced.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-PV-PENDING-RECOMPUTE",
+        Severity.FAIL,
+        "HG-02",
+        "Node depends on changed evidence; wait for recomputation.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-PV-SUPERSEDED",
+        Severity.FAIL,
+        "HG-02",
+        "Node was superseded or corrected; use the current state.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-PV-CONTRADICTION-PENDING",
+        Severity.FAIL,
+        "HG-07",
+        "A contradiction is recorded and not yet resolved.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-PV-CORRECTION-REJECTED",
+        Severity.FAIL,
+        "HG-07",
+        "Correction lacks authority or independent corroboration.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-PV-WRITE-COLLISION",
+        Severity.FAIL,
+        "PV",
+        "Concurrent write detected; the mutation was aborted.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-PV-DEPTH-CAP",
+        Severity.FAIL,
+        "HG-02",
+        "Propagation stopped at the depth cap; frontier queued.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-PV-RECOMPUTE-EXHAUSTED",
+        Severity.CRITICAL,
+        "HG-02",
+        "Recomputation attempts exhausted; node INVALIDATED.",
+        "0.86.0",
+    ),
+    ReasonCode(
+        "DAG-PV-RECOMPUTED",
+        Severity.INFO,
+        "PV",
+        "Node was recomputed from its current support and is ACTIVE again.",
+        "0.86.0",
+    ),
+    # Replan (CR-015)
+    ReasonCode(
+        "DAG-RP-RETRY_BUDGET_EXHAUSTED",
+        Severity.FAIL,
+        "RP",
+        "Retry budget exhausted; escalating.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-RP-UNCHANGED_REASON",
+        Severity.FAIL,
+        "RP",
+        "Replan produced identical reason fingerprint; escalating.",
+        "0.85.0",
+    ),
+    ReasonCode(
+        "DAG-RP-EVALUATION_ERROR",
+        Severity.CRITICAL,
+        "RP",
+        "Gate evaluation raised; treated as failure (fail-closed).",
+        "0.85.0",
+    ),
+)
 
 #: The closed registry. Immutable after import (INV-RC-2: append-only across
 #: versions; a code is never re-used with a different meaning).

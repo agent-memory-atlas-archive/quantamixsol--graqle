@@ -48,6 +48,18 @@ class TestRuntimeImportDirection:
     def test_config_settings_does_not_load_assurance_with_the_flag_off(self) -> None:
         assert _assurance_modules_loaded_by("graqle.config.settings") == []
 
+    def test_assurance_write_path_does_not_load_assurance(self) -> None:
+        # CR-016 PR-016b: the static graph sees governance -> ontology.assurance
+        # -> assurance.settings; those edges are lazy, so nothing is loaded.
+        for module in (
+            "graqle.governance.tamper_evidence.kg_persist",
+            "graqle.governance.tamper_evidence._assurance_write",
+            "graqle.ontology.assurance_integrity",
+            "graqle.ontology.assurance_ops",
+            "graqle.connectors.neo4j",
+        ):
+            assert _assurance_modules_loaded_by(module) == [], module
+
 
 class TestAssuranceMayImportGovernance:
     def test_direction_is_one_way(self) -> None:

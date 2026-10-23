@@ -254,6 +254,23 @@ class Ed25519KeyManifest:
             self._private_keys[kid] = private_key
         return entry
 
+    def attach_private_key(self, kid: str, private_key: Ed25519PrivateKey) -> None:
+        """Attach signing material to an already-registered ACTIVE ``kid``.
+
+        The private key must match the registered public key; a mismatch or a
+        non-ACTIVE key is refused (CR-018 PR-018b). Additive helper: no
+        existing method changes.
+        """
+        from cryptography.hazmat.primitives import serialization
+
+        entry = self.get(kid)
+        if entry.state is not KeyState.ACTIVE:
+            raise KeyNotSignableError(f"key {kid!r} is not ACTIVE")
+        raw = serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        if private_key.public_key().public_bytes(*raw) != entry.public_key.public_bytes(*raw):
+            raise KeyManifestError(f"private key does not match the public key of {kid!r}")
+        self._private_keys[kid] = private_key
+
     def get(self, kid: str) -> KeyEntry:
         """Return the :class:`KeyEntry` for ``kid`` or raise :class:`UnknownKidError`."""
         try:

@@ -22,11 +22,15 @@ and CR-015 populate them.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from graqle.assurance.outcomes import GateOutcome
 from graqle.assurance.reason_codes import validate as _validate_codes
+
+if TYPE_CHECKING:  # verdict must not import hard_gates at runtime (no cycle)
+    from graqle.assurance.hard_gates import HardGateResult
 
 __all__ = [
     "VERDICT_SCHEMA_VERSION",
@@ -85,6 +89,19 @@ class HardGateResultRef(BaseModel):
         if self.error is not None and self.passed:
             raise ValueError("a hard gate with error must not pass")
         return self
+
+    @classmethod
+    def from_result(cls, result: HardGateResult) -> HardGateResultRef:
+        """Project a CR-013 :class:`~graqle.assurance.hard_gates.HardGateResult`."""
+        return cls(
+            rule_id=result.rule_id,
+            rule_version=result.rule_version,
+            passed=result.passed,
+            decisive_conditions=list(result.decisive_conditions),
+            inputs_hash=result.inputs_hash,
+            evaluated_at=result.evaluated_at,
+            error=result.error,
+        )
 
 
 class GateVerdict(BaseModel):
