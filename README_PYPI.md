@@ -76,7 +76,17 @@ verdict.decisive_rule   # which rule decided
 verdict.reason_codes    # why
 ```
 
-**Every decision leaves a sealed record:** a signed, hash-chained provenance event, exportable to W3C PROV-O and checkable with SHACL, so an auditor can verify it with standard tools. The gate is off by default; switch it on per project.
+**Every decision leaves a sealed record:** a signed, hash-chained provenance event, exportable to W3C PROV-O and checkable with SHACL, so an auditor can verify it with standard tools. The gate is **off by default**: installing or upgrading GraQle changes nothing until you switch it on.
+
+**Turn it on, per project:**
+
+1. Set `GRAQLE_DAG_ENABLED=true` in the environment where GraQle runs (or in your `.env`).
+2. Provide the required settings. GraQle ships no thresholds, salts or keys: you choose them. Start from the `GRAQLE_DAG_*` section of [`.env.example`](https://github.com/quantamixsol/graqle/blob/master/.env.example) and fill in every placeholder (salt, thresholds, signing key id and version, calibrator version, and the others listed there). Put the values in the environment, or in a private file at `GRAQLE_DAG_SECRETS_PATH` (default `.graqle/graqle_secrets.yaml`); the environment wins.
+3. Start as usual. If a required value is missing, GraQle raises a configuration error that names it the first time the gate settings load. There is no silent fallback.
+
+Check it: `python -c "from graqle.assurance.settings import is_dag_enabled; print(is_dag_enabled())"` prints `True`.
+
+To switch it off again, unset the flag or set it to `false`. Details: [operating the gate](https://github.com/quantamixsol/graqle/blob/master/docs/dag/ground-truth-addendum.md).
 
 ---
 
