@@ -27,9 +27,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Lint with ruff (auto-fix + report)
+      - name: Lint with ruff (report only, no auto-fix)
         run: |
-          ruff check --fix graqle/ tests/ || true
+          ruff check graqle/ tests/ || true
           echo "Lint complete (warnings reported, not blocking)"
 
       # CR-012 PR-012b (AC-21): the DAG dependency-direction contract.
