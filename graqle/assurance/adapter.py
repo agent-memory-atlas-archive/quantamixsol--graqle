@@ -46,7 +46,9 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "NON_EXECUTE_HOOKS",
+    "RuntimeNotRegisteredError",
     "VerdictStore",
+    "ensure_runtime_registered",
     "register_runtime",
     "route_via_dag",
     "to_gate_result",
@@ -80,6 +82,51 @@ def register_runtime(provider: RuntimeProvider | None) -> None:
     """Install (or clear, with ``None``) the provider that builds the gate and context."""
     global _runtime_provider
     _runtime_provider = provider
+
+
+class RuntimeNotRegisteredError(RuntimeError):
+    """The flag is on but no runtime provider is registered (start-up self-check)."""
+
+
+_DEFAULT_PROVIDER_MODULE = "graqle.assurance.default_provider"
+_DEFAULT_PROVIDER_FACTORY = "build_default_provider"
+
+
+def _load_default_provider() -> RuntimeProvider | None:
+    """Return the packaged default provider, or ``None`` when this build ships none.
+
+    Only a missing default-provider module counts as "none shipped"; any other import
+    or construction error propagates so a broken provider fails loudly at start-up.
+    """
+    import importlib
+
+    try:
+        module = importlib.import_module(_DEFAULT_PROVIDER_MODULE)
+    except ModuleNotFoundError as exc:
+        if exc.name != _DEFAULT_PROVIDER_MODULE:
+            raise
+        return None
+    factory = getattr(module, _DEFAULT_PROVIDER_FACTORY, None)
+    return factory() if callable(factory) else None
+
+
+def ensure_runtime_registered() -> None:
+    """Start-up self-check, called only when the flag is on.
+
+    Registers the packaged default provider when none is installed yet. If there is
+    still no provider afterwards, raise an error naming ``register_runtime`` instead of
+    failing closed on every later call.
+    """
+    if _runtime_provider is not None:
+        return
+    provider = _load_default_provider()
+    if provider is not None:
+        register_runtime(provider)
+        return
+    raise RuntimeNotRegisteredError(
+        "GRAQLE_DAG_ENABLED is on but no DAG runtime provider is registered; "
+        "call graqle.assurance.adapter.register_runtime(provider) before starting governance"
+    )
 
 
 def _store_capacity() -> int:

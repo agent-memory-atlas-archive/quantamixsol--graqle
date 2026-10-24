@@ -533,6 +533,13 @@ class GovernanceMiddleware:
             except Exception:
                 self._policy = None
         self._ensure_state_loaded()
+        from graqle.assurance.settings import is_dag_enabled  # pure env read
+
+        if is_dag_enabled():
+            # CR-DAG-087-1: flag on -> fail loudly here, not on every later call.
+            from graqle.assurance.adapter import ensure_runtime_registered  # lazy; flag-off never imports
+
+            ensure_runtime_registered()
 
     @classmethod
     def _ensure_state_loaded(cls) -> None:

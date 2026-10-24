@@ -18,8 +18,8 @@ PROTECTED: dict[str, str] = {
     # Re-pinned by CR-015 PR-015c, the CR that owns the DAG-ESCALATE rbac tier edit.
     "graqle/core/rbac.py": "ec9acbdd4869ac3e3400319f3e41e62b0b59122af5fefe449ddd1b98c3a37b0d",
     "graqle/intelligence/governance/drace.py": "77b91ba7acc9abc620a6ee134ba1116b5fe0b99e93e355f8867df598dbdb0406",  # noqa: E501
-    # Re-pinned by CR-015 PR-015b, the CR that owns the check() dispatcher edit.
-    "graqle/core/governance.py": "f4960b4e459d8dc4326d65767dd5050815f48d86dfce32950b1dcbb993aa5df5",
+    # Re-pinned by CR-DAG-087-1 PR-A, the CR that owns the flag-guarded runtime-provider hook.
+    "graqle/core/governance.py": "f8894d03b033cd81ddc650e1891e1beed4387f14c789fe6d6ad534840b560471",
 }
 
 
