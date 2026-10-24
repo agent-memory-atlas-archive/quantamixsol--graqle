@@ -55,7 +55,7 @@ _SEVERITY_RANK: dict[Severity, int] = {
 
 #: R1 (2026-09-13): the ONLY reason-code grammar in the SDK. Widened once in
 #: PR-012b; hyphens are legal after the namespace segment.
-CODE_PATTERN = re.compile(r"^DAG-(HG0[1-7]|CV|TR|PV|RP)-[A-Z0-9_-]{2,48}$")
+CODE_PATTERN = re.compile(r"^DAG-(HG0[1-7]|CV|TR|PV|RP|RT)-[A-Z0-9_-]{2,48}$")
 
 _MAX_HINT_CHARS = 200
 
@@ -549,6 +549,14 @@ _SEED: tuple[ReasonCode, ...] = (
         "PV",
         "Node was recomputed from its current support and is ACTIVE again.",
         "0.86.0",
+    ),
+    # Baseline admission (CR-DAG-087-1 PR-B)
+    ReasonCode(
+        "DAG-RT-NO-EVIDENCE",
+        Severity.WARN,
+        "RT",
+        "No graph evidence was supplied; request a human review or supply evidence.",
+        "0.87.1",
     ),
     # Replan (CR-015)
     ReasonCode(

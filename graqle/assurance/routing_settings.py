@@ -27,7 +27,14 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from graqle.assurance.gate import ImpactTier
 from graqle.assurance.settings import ENV_PREFIX, ConfigurationError
 
-__all__ = ["RoutingSettings"]
+__all__ = [
+    "BASELINE_TIER_AUTOMATION_MAX",
+    "BaselineRoutingSettings",
+    "RoutingSettings",
+]
+
+#: Public symbolic ceiling for the baseline admission rule: only LOW risk is admitted.
+BASELINE_TIER_AUTOMATION_MAX = ImpactTier.LOW
 
 _FLOOR_PREFIX = ENV_PREFIX + "TRAJECTORY_FLOOR_"
 _BUDGET_PREFIX = ENV_PREFIX + "RESIDUAL_RISK_BUDGET_"
@@ -42,6 +49,30 @@ def _open_unit(value: object) -> bool:
         and math.isfinite(value)
         and 0.0 < value < 1.0
     )
+
+
+class BaselineRoutingSettings(BaseModel):
+    """Public symbolic settings for DAG-RT-BASELINE-ADMIT only (CR-DAG-087-1 PR-B).
+
+    Deliberately NOT a :class:`RoutingSettings` and carries no floor or budget: the numeric
+    routing path (DAG-RT-17 and every MEDIUM+ path) keeps requiring ``RoutingSettings.from_env()``
+    and never sees these defaults. The ceiling may be overridden through the environment.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tier_automation_max: ImpactTier = BASELINE_TIER_AUTOMATION_MAX
+
+    @classmethod
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> BaselineRoutingSettings:
+        env = os.environ if environ is None else environ
+        raw = env.get(_AUTOMATION_MAX, "").strip().upper()
+        if not raw:
+            return cls()
+        try:
+            return cls(tier_automation_max=ImpactTier(raw))
+        except ValueError:
+            raise ConfigurationError(f"{_AUTOMATION_MAX} is not an impact tier") from None
 
 
 class RoutingSettings(BaseModel):
