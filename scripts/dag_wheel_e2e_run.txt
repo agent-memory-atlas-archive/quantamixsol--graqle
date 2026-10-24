@@ -1,0 +1,38 @@
+$ /home/coord/coord-remote/venv0851/bin/python -m build --wheel --outdir /tmp/dag-e2e-run3/dist
+Successfully built graqle-0.85.1-py3-none-any.whl
+$ /home/coord/coord-remote/venv0851/bin/python -m venv /tmp/dag-e2e-run3/venv
+$ /tmp/dag-e2e-run3/venv/bin/python -m pip install --quiet /tmp/dag-e2e-run3/dist/graqle-0.85.1-py3-none-any.whl
+installed package: /tmp/dag-e2e-run3/venv/lib/python3.10/site-packages/graqle/__init__.py
+
+== setup
+$ /tmp/dag-e2e-run3/venv/bin/python -I /home/coord/gq/sdk_builder_3/scripts/dag_wheel_e2e.py setup
+ok: signing key (0600), key manifest and coverage policy file created
+
+== run
+$ /tmp/dag-e2e-run3/venv/bin/python -I /home/coord/gq/sdk_builder_3/scripts/dag_wheel_e2e.py run
+ok: default runtime provider registered at start-up
+  LOW risk, zero impact: tier=T1 blocked=False reason='EXECUTE: DAG-RT-BASELINE-ADMIT - DAG-RT-BASELINE-ADMIT: EXECUTE'
+  MEDIUM risk, registered senior actor: tier=T2 blocked=True reason='HOLD: DAG-RT-BASELINE-ADMIT - DAG-RT-BASELINE-ADMIT: HOLD'
+  MEDIUM risk, unregistered actor (HG-06): tier=T3 blocked=True reason='REJECT: DAG-RT-BASELINE-ADMIT - DAG-RT-BASELINE-ADMIT: REJECT'
+  HIGH risk, no provenance (HG-03): tier=T3 blocked=True reason='REJECT: DAG-RT-BASELINE-ADMIT - DAG-RT-BASELINE-ADMIT: REJECT'
+  recorded: LOW risk, zero impact: outcome=EXECUTE reason_codes=[]
+  recorded: MEDIUM risk, registered senior actor: outcome=HOLD reason_codes=['DAG-RT-NO-EVIDENCE']
+  recorded: MEDIUM risk, unregistered actor (HG-06): outcome=REJECT reason_codes=['DAG-HG06-ACTOR_UNAUTHORIZED']
+  recorded: HIGH risk, no provenance (HG-03): outcome=REJECT reason_codes=['DAG-HG03-PROVENANCE_MISSING', 'DAG-HG06-ACTOR_UNAUTHORIZED']
+ok: EXECUTE / HOLD / REJECT recorded with reason codes, seven hard gates each, one event per call
+
+== verify
+$ /tmp/dag-e2e-run3/venv/bin/python -I /home/coord/gq/sdk_builder_3/scripts/dag_wheel_e2e.py verify
+ok: 4 events: hash chain intact and every signature verifies
+
+== flag-off
+$ /tmp/dag-e2e-run3/venv/bin/python -I /home/coord/gq/sdk_builder_3/scripts/dag_wheel_e2e.py flag-off
+  legacy result: tier=T1 blocked=False
+ok: flag off: legacy path only, adapter not imported, no events written
+
+== bad-provider
+$ /tmp/dag-e2e-run3/venv/bin/python -I /home/coord/gq/sdk_builder_3/scripts/dag_wheel_e2e.py bad-provider
+  start-up error: the default DAG runtime provider could not be built (ConfigurationError: signing key could not be loaded (FileNotFoundError)); fix the GRAQLE_DAG_* settings or call graqle.assurance.adapter.register_runtime(provider)
+ok: invalid provider -> start-up error naming register_runtime
+
+ALL STEPS PASSED (wheel: graqle-0.85.1-py3-none-any.whl)
