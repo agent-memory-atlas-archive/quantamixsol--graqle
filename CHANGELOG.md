@@ -4,6 +4,31 @@ All notable changes to GraQle are documented in this file.
 
 ---
 
+## 0.87.1 — 2026-10-24 (Decision Assurance Gate: working flag-on path)
+
+### Fixed
+
+- With `GRAQLE_DAG_ENABLED` on, 0.87.0 stopped every governed call: no runtime provider was registered, so the
+  gate failed closed (`DAG-TR-010-EVALUATION_ERROR`) and wrote no record. 0.87.1 registers a default provider and
+  fails at start-up, naming `register_runtime`, if none can be loaded. With the flag off nothing changes.
+
+### Added
+
+- **Baseline admission rule `DAG-RT-BASELINE-ADMIT`** (default provider, flag on only). EXECUTE only when risk is
+  LOW, impact is zero and all hard gates (HG-01..HG-07) pass; anything else is REJECT or HOLD
+  (`DAG-RT-NO-EVIDENCE`). No projection score, reliability or residual risk is computed or recorded for
+  baseline decisions. MEDIUM and above routing still needs explicit configuration.
+- Every baseline decision, EXECUTE included, is written as a signed, hash-chained provenance event in the file
+  store, with its evidence tier. If the event cannot be written, the call is not executed.
+- `scripts/dag_wheel_e2e.py`: an end-to-end check that runs the documented enable steps from the built wheel.
+
+### Notes
+
+- Baseline EXECUTE is a policy-scoped authorisation at evidence tier BASELINE. It is not informed by the graph
+  and is not a safety verification. Evidence-fed scoring is planned for 0.88.
+
+---
+
 ## 0.87.0 — Decision Assurance Gate
 
 ### Added

@@ -1,0 +1,54 @@
+# Built-wheel end-to-end run for GraQle 0.87.1 (release/0.87.1, head 8ad28c8d4150b132e8c416a73f1cae6df5e74eb8 plus this file)
+# Command: python scripts/dag_wheel_e2e.py  (builds the wheel from this checkout, installs the WHEEL, not the source tree, into a fresh venv)
+# Run on 2026-10-25 by the control room, Windows 11, Python 3.10. Local absolute paths are replaced by <checkout>, <build-env>, <tmp>, <local-path>.
+
+$ <build-env>\Scripts\python.exe -m build --wheel --outdir <tmp>\dag-wheel-e2e-i9_jxjpy\dist
+* Creating isolated environment: venv+pip...
+* Installing packages in isolated environment:
+  - hatchling
+* Getting build dependencies for wheel...
+* Installed build dependency versions:
+  - hatchling==1.32.4
+* Building wheel...
+Successfully built graqle-0.87.1-py3-none-any.whl
+$ <build-env>\Scripts\python.exe -m venv <tmp>\dag-wheel-e2e-i9_jxjpy\venv
+$ <tmp>\dag-wheel-e2e-i9_jxjpy\venv\Scripts\python -m pip install --quiet <tmp>\dag-wheel-e2e-i9_jxjpy\dist\graqle-0.87.1-py3-none-any.whl
+WARNING: typer 0.27.3 does not provide the extra 'all'
+
+[notice] A new release of pip is available: 23.0.1 -> 26.2.2
+[notice] To update, run: <tmp>\dag-wheel-e2e-i9_jxjpy\venv\Scripts\python.exe -m pip install --upgrade pip
+installed package: <tmp>\dag-wheel-e2e-i9_jxjpy\venv\lib\site-packages\graqle\__init__.py
+
+== setup
+$ <tmp>\dag-wheel-e2e-i9_jxjpy\venv\Scripts\python -I <checkout>\scripts\dag_wheel_e2e.py setup
+ok: signing key (0600), key manifest and coverage policy file created
+
+== run
+$ <tmp>\dag-wheel-e2e-i9_jxjpy\venv\Scripts\python -I <checkout>\scripts\dag_wheel_e2e.py run
+ok: default runtime provider registered at start-up
+  LOW risk, zero impact: tier=T1 blocked=False reason='EXECUTE: DAG-RT-BASELINE-ADMIT - DAG-RT-BASELINE-ADMIT: EXECUTE'
+  MEDIUM risk, registered senior actor: tier=T2 blocked=True reason='HOLD: DAG-RT-BASELINE-ADMIT - DAG-RT-BASELINE-ADMIT: HOLD'
+  MEDIUM risk, unregistered actor (HG-06): tier=T3 blocked=True reason='REJECT: DAG-RT-BASELINE-ADMIT - DAG-RT-BASELINE-ADMIT: REJECT'
+  HIGH risk, no provenance (HG-03): tier=T3 blocked=True reason='REJECT: DAG-RT-BASELINE-ADMIT - DAG-RT-BASELINE-ADMIT: REJECT'
+  recorded: LOW risk, zero impact: outcome=EXECUTE reason_codes=[]
+  recorded: MEDIUM risk, registered senior actor: outcome=HOLD reason_codes=['DAG-RT-NO-EVIDENCE']
+  recorded: MEDIUM risk, unregistered actor (HG-06): outcome=REJECT reason_codes=['DAG-HG06-ACTOR_UNAUTHORIZED']
+  recorded: HIGH risk, no provenance (HG-03): outcome=REJECT reason_codes=['DAG-HG03-PROVENANCE_MISSING', 'DAG-HG06-ACTOR_UNAUTHORIZED']
+ok: EXECUTE / HOLD / REJECT recorded with reason codes, seven hard gates each, one event per call
+
+== verify
+$ <tmp>\dag-wheel-e2e-i9_jxjpy\venv\Scripts\python -I <checkout>\scripts\dag_wheel_e2e.py verify
+ok: 4 events: hash chain intact and every signature verifies
+
+== flag-off
+$ <tmp>\dag-wheel-e2e-i9_jxjpy\venv\Scripts\python -I <checkout>\scripts\dag_wheel_e2e.py flag-off
+  legacy result: tier=T1 blocked=False
+ok: flag off: legacy path only, adapter not imported, no events written
+
+== bad-provider
+$ <tmp>\dag-wheel-e2e-i9_jxjpy\venv\Scripts\python -I <checkout>\scripts\dag_wheel_e2e.py bad-provider
+  start-up error: the default DAG runtime provider could not be built (ConfigurationError: signing key could not be loaded (FileNotFoundError)); fix the GRAQLE_DAG_* settings or call graqle.assurance.adapter.register_runtime(provider)
+ok: invalid provider -> start-up error naming register_runtime
+
+ALL STEPS PASSED (wheel: graqle-0.87.1-py3-none-any.whl)
+work directory left at <tmp>\dag-wheel-e2e-i9_jxjpy (remove it when done)

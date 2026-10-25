@@ -114,6 +114,34 @@ graq mcp serve --transport http --port 8765 --config graqle.yaml --allowed-roots
 - **Teammates connect** over an SSH tunnel, or HTTPS with a token.
 - **Several projects, separate graphs** on one server (Team and Enterprise).
 
+### Turn on the decision gate (opt-in, baseline tier)
+
+The decision gate is off unless `GRAQLE_DAG_ENABLED` is set; with it off nothing changes. Turn it on:
+
+1. Create an ed25519 signing key (PEM, mode `0600`) and a key manifest that lists its public key
+   (`graqle.assurance.key_manifest_store.save_manifest`), plus a coverage policy file.
+2. Set `GRAQLE_DAG_ENABLED=1` and the required `GRAQLE_DAG_*` settings: `SIGNING_KEY_ID`,
+   `SIGNING_KEY_VERSION`, `SIGNING_KEY_PATH`, `COVERAGE_POLICY_PATH`, `CONFIG_SALT`, `CAP_VALUE`,
+   `HG05_POISONING_THRESHOLD`, `HG07_MATERIALITY_THRESHOLD`, `CALIBRATOR_VERSION`,
+   `TRAJECTORY_ESTIMATOR`, `MAX_RETRY_BUDGET`, `CIRCUIT_BREAKER_WINDOW`, `SCOPE_KEY_FIELDS_REF`,
+   `MERGE_PRIORITY_REF`. There are no built-in values for these; you choose them.
+3. Register the actors that may take MEDIUM-risk calls (for example `GRAQLE_RBAC_ACTORS_JSON`). An
+   actor with no registered role is closed by hard gate HG-06.
+4. Start your process. The packaged default runtime provider is registered at start-up. If it
+   cannot be built the process fails at start-up with an error naming `register_runtime`; supply
+   your own provider with `graqle.assurance.adapter.register_runtime(provider)` if you need one.
+
+Baseline-tier decisions are governed by rule `DAG-RT-BASELINE-ADMIT`. No projection score,
+reliability or residual risk is computed or recorded for them. EXECUTE only when risk is LOW,
+impact is zero and all hard gates pass; anything else is HOLD (`DAG-RT-NO-EVIDENCE`) or, when a
+hard gate fails, REJECT. MEDIUM and above routing requires explicit configuration. Every decision
+is written as a signed, hash-chained provenance event; if it cannot be written the call is not
+executed.
+
+This is a policy-scoped authorisation at evidence tier BASELINE. It is not informed by the graph
+and is not a safety verification. Evidence-fed scoring arrives in 0.88 (CR-DAG-088-1).
+`python scripts/dag_wheel_e2e.py` runs these steps against the built wheel in a clean virtualenv.
+
 ---
 
 ## Trust
